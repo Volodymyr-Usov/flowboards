@@ -1,0 +1,8 @@
+/* Recycle Bin: a note, then the table of deleted items */
+.v-recycle .rb-note { margin: 0 0 10px; }
+.v-recycle .rb-table td { vertical-align: middle; }
+.v-recycle .rb-type, .v-recycle .rb-who { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.v-recycle .rb-title { min-width: 220px; }
+.v-recycle .rb-act { text-align: right; white-space: nowrap; }
+.v-recycle .rb-scroll { overflow-x: auto; }
+.rb-more { display: flex; align-items: center; gap: 12px; padding: 10px 2px; }

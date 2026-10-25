@@ -1,0 +1,27 @@
+/* Chart parts shared by the Flow and People views (src/views/chartkit.ts). Tokens only. */
+:is(.v-flow, .v-people) .ck { display: block; overflow: visible; font-family: var(--font); }
+:is(.v-flow, .v-people) .ck-grid line { stroke: var(--soft); stroke-width: 1; shape-rendering: crispEdges; }
+:is(.v-flow, .v-people) .ck-grid line.base { stroke: var(--line); }
+:is(.v-flow, .v-people) .ck-grid text, :is(.v-flow, .v-people) .ck text.ck-lab { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+:is(.v-flow, .v-people) .ck text.ck-val { fill: var(--ink); font-size: 11px; font-weight: 600; }
+:is(.v-flow, .v-people) .ck-hit { fill: transparent; pointer-events: all; }
+:is(.v-flow, .v-people) .ck-hit.hot { cursor: pointer; }
+:is(.v-flow, .v-people) .ck-band { fill: transparent; outline: none; }
+:is(.v-flow, .v-people) .ck-band:hover, :is(.v-flow, .v-people) .ck-band:focus-visible { fill: var(--hover); }
+:is(.v-flow, .v-people) .ck-band:focus-visible { stroke: var(--accent); stroke-width: 1; }
+:is(.v-flow, .v-people) .ck-tip { position: fixed; z-index: 140; pointer-events: none; background: var(--panel); color: var(--ink); border: 1px solid var(--line);
+  border-radius: 6px; box-shadow: var(--shadow); padding: 6px 9px; font-size: 12px; max-width: 320px; }
+:is(.v-flow, .v-people) .ck-head { color: var(--muted); margin-bottom: 3px; }
+:is(.v-flow, .v-people) .ck-row { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+:is(.v-flow, .v-people) .ck-row b { font-variant-numeric: tabular-nums; }
+:is(.v-flow, .v-people) .ck-row span { color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+:is(.v-flow, .v-people) .ck-key { width: 10px; height: 2px; border-radius: 1px; flex: none; }
+:is(.v-flow, .v-people) .ck-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--muted); margin-top: 6px; }
+:is(.v-flow, .v-people) .ck-legend span { display: inline-flex; align-items: center; gap: 6px; }
+:is(.v-flow, .v-people) .ck-sw { display: inline-block; flex: none; }
+:is(.v-flow, .v-people) .ck-sw.rect { width: 10px; height: 10px; border-radius: 2px; }
+:is(.v-flow, .v-people) .ck-sw.line { width: 14px; height: 2px; border-radius: 1px; }
+:is(.v-flow, .v-people) .ck-sw.dot { width: 9px; height: 9px; border-radius: 50%; }
+:is(.v-flow, .v-people) .ck-table { margin-top: 8px; font-size: 12px; }
+:is(.v-flow, .v-people) .ck-table summary { cursor: pointer; color: var(--muted); width: fit-content; }
+:is(.v-flow, .v-people) .ck-table-scroll { max-height: 280px; overflow: auto; margin-top: 6px; }

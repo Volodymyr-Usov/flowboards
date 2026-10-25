@@ -1,0 +1,66 @@
+/* Strategy: pillars -> Epics -> Features, left to right, with curved lines between the columns. */
+.v-strategy { --st-p: 250px; --st-e: 310px; --st-gap: 48px; }
+.v-strategy .st-status { min-height: 18px; }
+.v-strategy .st-spin { display: inline-flex; align-items: center; gap: 8px; }
+.v-strategy .st-spin .spin { width: 12px; height: 12px; }
+.v-strategy .st-wrap { overflow-x: auto; padding-bottom: 8px; }
+.v-strategy .st-heads, .v-strategy .st-graph { min-width: calc(var(--st-p) + var(--st-e) + 260px + 2 * var(--st-gap)); }
+.v-strategy .st-heads { display: grid; grid-template-columns: var(--st-p) var(--st-e) minmax(240px, 380px); column-gap: var(--st-gap);
+  font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding: 0 0 6px; border-bottom: 1px solid var(--line); margin-bottom: 10px; }
+.v-strategy .st-graph { position: relative; display: flex; flex-direction: column; gap: 14px; }
+.v-strategy .st-wires { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; }
+.v-strategy .st-wires path { fill: none; stroke-width: 1.6; opacity: .55; }
+.v-strategy .st-band { display: grid; grid-template-columns: var(--st-p) minmax(0, 1fr); column-gap: var(--st-gap); padding-bottom: 14px; border-bottom: 1px dashed var(--soft); }
+.v-strategy .st-band:last-of-type { border-bottom: 0; }
+.v-strategy .st-pcell { align-self: start; position: sticky; top: calc(var(--bar-h) + 8px); z-index: 1; }
+.v-strategy .st-ecol { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.v-strategy .st-erow { display: grid; grid-template-columns: var(--st-e) minmax(240px, 380px); column-gap: var(--st-gap); align-items: start; }
+.v-strategy .st-feats { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.v-strategy .st-noepic, .v-strategy .st-nofeat { padding: 8px 2px; }
+.v-strategy .st-note { margin: 4px 0 0; }
+
+.v-strategy .st-card { position: relative; z-index: 1; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 10px;
+  display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.v-strategy .st-card[role="button"] { cursor: pointer; }
+.v-strategy .st-card[role="button"]:hover { border-color: color-mix(in srgb, var(--pc, var(--accent)) 60%, var(--line)); }
+.v-strategy .st-card.sel { box-shadow: 0 0 0 2px var(--accent); border-color: var(--accent); }
+.v-strategy .st-card.st-closed { opacity: .7; }
+.v-strategy .st-pillar { border-top: 4px solid var(--pc); padding-top: 10px; }
+.v-strategy .st-pillar.st-none { border-top-style: dashed; }
+.v-strategy .st-ptitle { display: flex; align-items: center; gap: 8px; }
+.v-strategy .st-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--pc); flex: none; }
+.v-strategy .st-desc { margin: 0; color: var(--muted); font-size: 12.5px; }
+.v-strategy .st-epic { border-left: 4px solid var(--pc); }
+.v-strategy .st-feat { padding: 6px 10px; gap: 4px; }
+.v-strategy .st-title { display: flex; align-items: baseline; gap: 3px; min-width: 0; font-size: 13px; line-height: 1.3; }
+.v-strategy .st-title .t { overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.v-strategy .st-epic .st-title { font-weight: 600; }
+.v-strategy .st-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.v-strategy .st-warn { display: inline-flex; align-items: center; gap: 3px; font-size: 11.5px; font-weight: 600; color: var(--warn); background: var(--warn-soft);
+  border-radius: 4px; padding: 0 6px; cursor: help; }
+.v-strategy .st-prog { display: flex; align-items: center; gap: 8px; }
+.v-strategy .st-prog-track { flex: 1; height: 6px; border-radius: 3px; background: var(--soft); overflow: hidden; }
+.v-strategy .st-prog-fill { height: 100%; background: var(--ok); border-radius: 3px; }
+.v-strategy .st-prog .small { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.v-strategy .st-chart { display: inline-flex; flex-direction: column; gap: 2px; align-self: flex-start; }
+.v-strategy .st-bars { display: block; overflow: visible; }
+.v-strategy .st-bars .st-base { stroke: var(--line); stroke-width: 1; }
+.v-strategy .st-bars .st-hit { fill: transparent; }
+.v-strategy .st-bars .st-bar:hover .st-hit { fill: var(--hover); }
+.v-strategy .st-chart-cap { display: flex; justify-content: space-between; gap: 6px; font-size: 10.5px; color: var(--muted); }
+.v-strategy .st-chart-cap b { color: var(--ink); font-weight: 600; }
+.v-strategy .st-pick { display: flex; align-items: center; gap: 8px; }
+.v-strategy .st-psel { font-size: 12px; padding: 2px 22px 2px 6px; max-width: 220px; }
+
+/* pillars edited on the page: a gear on each card, an "Add pillar" card under the last one */
+.v-strategy .st-ptitle { display: flex; align-items: center; gap: 6px; }
+.v-strategy .st-ptitle h3 { flex: 1; min-width: 0; }
+.v-strategy .st-pedit { opacity: .55; }
+.v-strategy .st-pillar:hover .st-pedit, .v-strategy .st-pedit:focus-visible { opacity: 1; }
+.v-strategy .st-addp { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; min-height: 56px; border: 1.5px dashed var(--line); background: transparent; color: var(--muted); font: inherit; font-weight: 600; cursor: pointer; }
+.v-strategy .st-addp:hover { color: var(--accent); border-color: var(--accent); }
+.st-pform { width: 320px; gap: 8px; }
+.st-pform .pe-palette { display: flex; flex-wrap: wrap; gap: 6px; }
+/* an empty pillar: add an existing Epic or a new one; a pillar form that kept unsaved text */
+.v-strategy .st-addepic { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.st-pform .st-kept { margin: 0; color: var(--warn); }

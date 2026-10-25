@@ -1,0 +1,18 @@
+/* About: one column of cards, the name and version at the top. */
+.v-about .ab { display: flex; flex-direction: column; gap: 12px; max-width: 720px; padding: 4px 0 24px; }
+.v-about .ab h1 { margin: 0 0 4px; font-size: 22px; }
+.v-about .ab h3 { margin: 0 0 6px; font-size: 14px; }
+.v-about .ab p { margin: 0 0 6px; line-height: 1.45; }
+.v-about .ab-hero { display: flex; gap: 14px; align-items: flex-start; }
+.v-about .ab-icon { flex: none; border-radius: 10px; }
+.v-about .ab-row { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 10px; font-size: 13.5px; padding: 2px 0; }
+.v-about .ab-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.v-about .ab-actions a.btn { text-decoration: none; }
+.v-about .ab-list { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
+@media (max-width: 600px) {
+  .v-about .ab-row { grid-template-columns: 1fr; gap: 0; }
+}
+.v-about .ab-author { display: flex; align-items: center; gap: 14px; }
+.v-about .ab-author h3 { margin-bottom: 4px; }
+.v-about .ab-photo { flex: none; width: 64px; height: 64px; border-radius: 50%; object-fit: cover; box-shadow: 0 0 0 2px var(--line); }
+.v-about .ab-initials { display: inline-grid; place-items: center; background: var(--accent-soft); color: var(--accent); font: 600 20px var(--font-head); }

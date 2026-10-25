@@ -1,0 +1,11 @@
+/* Tags: the project's tags, tidied. */
+.v-tags .au-pane { display: flex; flex-direction: column; gap: 12px; }
+.v-tags .au-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.v-tags .au-chips .chip b { font-variant-numeric: tabular-nums; }
+.v-tags .au-list { display: flex; flex-direction: column; gap: 12px; }
+.v-tags .au-dup-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 6px; }
+.v-tags .au-table td { vertical-align: middle; }
+.v-tags .au-table th:last-child, .v-tags .au-table td:last-child { text-align: right; }
+.v-tags .au-acts { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
+.v-tags .au-chips .segmented { margin-left: auto; }
+.v-tags .au-more { display: flex; align-items: center; gap: 12px; padding: 10px 2px; }

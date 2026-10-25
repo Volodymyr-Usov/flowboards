@@ -1,0 +1,154 @@
+/* Roadmap: a sticky name column on the left, a time line that scrolls sideways, bars per row. */
+.v-roadmap .rm-scroll { position: relative; overflow: auto; max-height: calc(100vh - var(--bar-h) - 190px); min-height: 300px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); overscroll-behavior: contain; }
+.v-roadmap .rm-canvas { position: relative; }
+.v-roadmap .rm-conflicts { font: inherit; font-size: 12px; color: var(--bad); background: var(--bad-soft); border: 1px solid transparent; border-radius: 999px; padding: 1px 8px; cursor: pointer; }
+.v-roadmap .rm-conflicts:hover, .v-roadmap .rm-conflicts[aria-expanded="true"] { border-color: var(--bad); }
+.roadmap-conf .rm-conf { width: 420px; max-width: calc(100vw - 32px); max-height: 60vh; overflow: auto; padding: 4px 2px; }
+.roadmap-conf .rm-conf p { margin: 0 0 6px; }
+.roadmap-conf ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.roadmap-conf .rm-conf-item { display: block; width: 100%; padding: 4px 6px; border: 0; border-radius: 5px; background: none; color: var(--ink); font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
+.roadmap-conf .rm-conf-item:hover, .roadmap-conf .rm-conf-item:focus-visible { background: var(--hover); }
+.v-roadmap .rm-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; font-size: 12px; color: var(--muted); }
+.v-roadmap .rm-key { display: inline-flex; align-items: center; gap: 5px; }
+.v-roadmap .rm-key i { width: 14px; height: 9px; border-radius: 3px; background: color-mix(in srgb, var(--c) 45%, var(--panel)); border: 1px solid var(--c); }
+
+/* header: months or quarters, weeks, sprints */
+.v-roadmap .rm-head { position: sticky; top: 0; z-index: 6; display: flex; background: var(--panel-2); border-bottom: 1px solid var(--line); }
+.v-roadmap .rm-corner { position: sticky; left: 0; z-index: 7; flex: none; width: var(--name-w); display: flex; align-items: flex-end; justify-content: space-between;
+  gap: 8px; padding: 4px 10px; font-size: 12px; color: var(--ink); background: var(--panel-2); border-right: 1px solid var(--line); }
+.v-roadmap .rm-tracks { flex: none; display: flex; flex-direction: column; }
+.v-roadmap .rm-hrow { position: relative; height: 24px; }
+.v-roadmap .rm-hrow + .rm-hrow { border-top: 1px solid var(--soft); }
+.v-roadmap .rm-tick { position: absolute; top: 0; bottom: 0; padding: 3px 6px; border-left: 1px solid var(--line); font-size: 12px; color: var(--ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v-roadmap .rm-hrow.weeks .rm-tick { color: var(--muted); font-size: 11px; border-left-color: var(--soft); }
+.v-roadmap .rm-sprint { position: absolute; top: 3px; bottom: 3px; margin-left: 1px; padding: 1px 6px; border-radius: 4px; background: var(--soft); color: var(--muted);
+  font-size: 11px; line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v-roadmap .rm-sprint.current { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.v-roadmap .rm-today-mark { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--bad); }
+
+/* body: grid lines, arrows and today over the rows */
+.v-roadmap .rm-body { position: relative; }
+.v-roadmap .rm-grid, .v-roadmap .rm-over { position: absolute; top: 0; left: var(--name-w); pointer-events: none; }
+.v-roadmap .rm-over { z-index: 2; }
+.v-roadmap .rm-vline { position: absolute; top: 0; bottom: 0; border-left: 1px solid var(--soft); }
+.v-roadmap .rm-vline.major { border-left-color: var(--line); }
+.v-roadmap .rm-off { position: absolute; top: 0; bottom: 0; background: var(--hover); }
+.v-roadmap .rm-today { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--bad); opacity: .65; }
+.v-roadmap .rm-drop { position: absolute; top: 0; bottom: 0; background: var(--accent-soft); border-left: 2px solid var(--drop); }
+.v-roadmap .rm-drop::before { content: attr(data-label); position: sticky; top: 0; display: inline-block; margin: 4px; padding: 1px 6px; border-radius: 4px;
+  font-size: 11px; white-space: nowrap; background: var(--drop); color: var(--accent-ink); }
+.v-roadmap .rm-links { position: absolute; top: 0; left: var(--name-w); z-index: 1; overflow: visible; pointer-events: none; }
+.v-roadmap .rm-link { fill: none; stroke: var(--wire); stroke-width: 1.6; pointer-events: visibleStroke; }
+.v-roadmap .rm-link:hover { stroke: var(--wire-hot); stroke-width: 2.4; }
+.v-roadmap .rm-link.bad { stroke: var(--bad); }
+/* a wider, unseen line over each arrow takes the clicks */
+.v-roadmap .rm-link-hit { fill: none; stroke: transparent; stroke-width: 10; pointer-events: stroke; cursor: pointer; }
+.v-roadmap .rm-link-hit:hover { stroke: color-mix(in srgb, var(--wire-hot) 18%, transparent); }
+.v-roadmap .rm-link.flash { animation: rm-flash-line 1.2s ease-out 2; }
+@keyframes rm-flash-line { 50% { stroke-width: 5; } }
+.v-roadmap .rm-ah { fill: var(--wire); }
+.v-roadmap .rm-ah.bad { fill: var(--bad); }
+.v-roadmap .rm-none { position: sticky; left: 0; padding: 8px 12px; color: var(--muted); }
+
+/* rows */
+.v-roadmap .rm-row { display: flex; height: var(--row-h); border-bottom: 1px solid var(--soft); }
+.v-roadmap .rm-row.top { border-top: 1px solid var(--line); }
+.v-roadmap .rm-row.top:first-child { border-top: 0; }
+.v-roadmap .rm-name { position: sticky; left: 0; z-index: 4; flex: none; width: var(--name-w); display: flex; align-items: center; gap: 2px; min-width: 0;
+  padding: 0 8px 0 calc(4px + var(--depth) * 16px); background: var(--panel); border-right: 1px solid var(--line); }
+.v-roadmap .rm-row.top .rm-name { font-weight: 600; }
+.v-roadmap .rm-row.story .rm-name { font-size: 12.5px; }
+.v-roadmap .rm-row:hover .rm-name { background: color-mix(in srgb, var(--panel) 92%, var(--ink)); }
+.v-roadmap .rm-row.sel .rm-name { background: color-mix(in srgb, var(--panel) 85%, var(--accent)); }
+.v-roadmap .rm-caret, .v-roadmap .rm-caret-gap { flex: none; width: 20px; height: 20px; }
+.v-roadmap .rm-caret { display: grid; place-items: center; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--muted); cursor: pointer; }
+.v-roadmap .rm-caret:hover { background: var(--soft); color: var(--ink); }
+.v-roadmap .rm-caret .icon { transition: transform .12s; }
+.v-roadmap .rm-caret.open .icon { transform: rotate(90deg); }
+.v-roadmap .rm-title { flex: 1; min-width: 0; padding: 2px 2px; border: 0; background: none; color: var(--ink); font: inherit; text-align: left; cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.v-roadmap .rm-title:hover { text-decoration: underline; }
+.v-roadmap .rm-title.done { color: var(--muted); }
+.v-roadmap .rm-id { flex: none; color: var(--faint); font-size: 11px; font-weight: 400; }
+.v-roadmap .rm-more { flex: none; opacity: 0; }
+.v-roadmap .rm-row:hover .rm-more, .v-roadmap .rm-more:focus-visible, .v-roadmap .rm-more[aria-expanded="true"] { opacity: 1; }
+.v-roadmap .rm-bar.flash { animation: rm-flash 1.2s ease-out 2; }
+@keyframes rm-flash { 50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--bad) 45%, transparent); } }
+.v-roadmap .rm-lane { position: relative; flex: none; }
+.v-roadmap .rm-nodate { position: absolute; top: 8px; font-size: 11.5px; color: var(--faint); border: 1px dashed var(--line); border-radius: 4px; padding: 0 6px; white-space: nowrap; }
+
+/* bars */
+.v-roadmap .rm-bar { position: absolute; top: 5px; height: calc(var(--row-h) - 10px); display: flex; align-items: center; gap: 5px; padding: 0 9px 0 4px;
+  border: 1px solid color-mix(in srgb, var(--c) 75%, var(--panel)); border-radius: 6px; background: color-mix(in srgb, var(--c) 16%, var(--panel));
+  color: var(--ink); font-size: 12px; cursor: grab; user-select: none; touch-action: none; }
+.v-roadmap .rm-row.story .rm-bar { top: 8px; height: calc(var(--row-h) - 16px); font-size: 11.5px; }
+.v-roadmap .rm-bar > .avatar, .v-roadmap .rm-bar > .rm-bt { position: relative; }
+.v-roadmap .rm-track { position: absolute; inset: 0; border-radius: inherit; overflow: hidden; pointer-events: none; }
+.v-roadmap .rm-fill { height: 100%; background: color-mix(in srgb, var(--c) 42%, var(--panel)); }
+.v-roadmap .rm-bt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
+.v-roadmap .rm-bar:not(.narrow) > .rm-bt { position: sticky; left: calc(var(--name-w) + 6px); }
+.v-roadmap .rm-bar .avatar { pointer-events: none; }
+.v-roadmap .rm-bar.narrow { padding: 0; }
+.v-roadmap .rm-bar.narrow .avatar { display: none; }
+.v-roadmap .rm-bar.narrow .rm-bt { position: absolute; left: calc(100% + 6px); overflow: visible; color: var(--muted); }
+.v-roadmap .rm-bar.est { border-style: dashed; background: color-mix(in srgb, var(--c) 7%, var(--panel)); }
+.v-roadmap .rm-bar.done { opacity: .7; }
+.v-roadmap .rm-bar.late::after { content: ""; position: absolute; top: -1px; right: -1px; bottom: -1px; width: 4px; border-radius: 0 6px 6px 0; background: var(--bad); }
+.v-roadmap .rm-bar:hover { border-color: var(--c); }
+.v-roadmap .rm-bar:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.v-roadmap .rm-bar.sel { outline: 2px solid var(--accent); outline-offset: 1px; }
+.v-roadmap .rm-bar.dragging { cursor: grabbing; z-index: 3; box-shadow: var(--shadow); }
+.v-roadmap .rm-h { position: absolute; top: -1px; bottom: -1px; width: 8px; cursor: ew-resize; z-index: 1; }
+.v-roadmap .rm-h.l { left: -3px; }
+.v-roadmap .rm-h.r { right: -3px; }
+.v-roadmap .rm-h:hover { background: color-mix(in srgb, var(--c) 35%, transparent); border-radius: 4px; }
+
+/* the tip next to the pointer while dragging (lives on <body>) */
+.roadmap-tip { position: fixed; z-index: 170; pointer-events: none; background: var(--menu); color: var(--menu-ink); font-size: 12px; padding: 3px 8px; border-radius: 5px;
+  box-shadow: var(--shadow); white-space: nowrap; }
+
+/* unscheduled items */
+.v-roadmap .rm-unsched { margin-top: 12px; }
+.v-roadmap .rm-unsched h3 { display: flex; align-items: center; gap: 4px; margin-bottom: 6px; }
+.v-roadmap .rm-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.v-roadmap .rm-chip { display: inline-flex; align-items: center; gap: 4px; max-width: 340px; padding: 3px 9px 3px 6px; font-size: 12.5px; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 6px; cursor: grab; }
+.v-roadmap .rm-chip span:not(.type-mark):not(.mono) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v-roadmap .rm-chip:hover { border-color: var(--accent); }
+/* "likely done by": a diamond on the day 85 of 100 simulated futures are done; red after the target */
+.v-roadmap .rm-fc { position: absolute; top: 50%; transform: translate(-6px, -50%); display: flex; align-items: center; gap: 3px; z-index: 3; pointer-events: auto; cursor: help; white-space: nowrap; }
+.v-roadmap .rm-fc i { width: 11px; height: 11px; transform: rotate(45deg); background: var(--ok); border: 2px solid var(--panel); box-shadow: 0 0 0 1px var(--ok); }
+.v-roadmap .rm-fc span { font: 600 10.5px var(--mono); color: var(--ok); background: color-mix(in srgb, var(--panel) 85%, transparent); padding: 0 3px; border-radius: 3px; }
+.v-roadmap .rm-fc.none i { background: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.v-roadmap .rm-fc.none span { color: var(--accent); }
+.v-roadmap .rm-fc.late i { background: var(--bad); box-shadow: 0 0 0 1px var(--bad); }
+.v-roadmap .rm-fc.late span { color: var(--bad); }
+.v-roadmap .rm-fc-key { display: inline-block; width: 9px; height: 9px; transform: rotate(45deg); background: var(--ok); margin-right: 4px; }
+.v-roadmap .rm-fcnote { max-width: 360px; }
+
+/* rows shown only for the matches under them */
+.v-roadmap .rm-row.ctx .rm-name, .v-roadmap .rm-row.ctx .rm-lane > * { opacity: .5; }
+
+/* other teams: a heading row per team, read-only bars, dependencies between teams */
+.v-roadmap .rm-row.rm-team { background: var(--panel-2); border-top: 1px solid var(--line); }
+.v-roadmap .rm-row.rm-team:first-child { border-top: 0; }
+.v-roadmap .rm-row.rm-team .rm-name { gap: 6px; padding-left: 8px; background: var(--panel-2); color: var(--muted); }
+.v-roadmap .rm-team-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
+.v-roadmap .rm-team-proj { flex: none; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v-roadmap .rm-team-x { margin-left: auto; }
+.v-roadmap .rm-team-status { position: sticky; left: calc(var(--name-w) + 8px); display: inline-flex; align-items: center; gap: 4px; height: 100%; padding: 0 8px; white-space: nowrap; }
+.v-roadmap .rm-bar.ext { cursor: pointer; background-image: repeating-linear-gradient(135deg, transparent 0 6px, color-mix(in srgb, var(--c) 10%, transparent) 6px 8px); }
+.v-roadmap .rm-bar.conflict::before { content: ""; position: absolute; top: -4px; left: -4px; width: 9px; height: 9px; border-radius: 50%; background: var(--bad);
+  border: 2px solid var(--panel); z-index: 2; }
+.v-roadmap .rm-link.cross { stroke-width: 2; stroke-dasharray: 5 3; }
+.roadmap-teams .rm-teams { display: flex; flex-direction: column; gap: 4px; width: 300px; max-height: 60vh; overflow: auto; padding: 4px 2px; }
+.roadmap-teams h4 { margin: 8px 0 2px; font-size: 12px; color: var(--muted); }
+.roadmap-teams .rm-team-list { display: flex; flex-direction: column; gap: 2px; }
+.roadmap-teams .rm-team-pick { display: flex; align-items: center; gap: 6px; padding: 2px 4px; border-radius: 4px; cursor: pointer; }
+.roadmap-teams .rm-team-pick:hover { background: var(--hover); }
+.roadmap-teams select { margin-top: 4px; }
+
+/* read-only: bars and chips open on click, they do not drag */
+.v-roadmap.ro .rm-bar, .v-roadmap.ro .rm-chip { cursor: pointer; }

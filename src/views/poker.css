@@ -1,0 +1,39 @@
+/* Estimate (planning poker): story list on the left, the table on the right. */
+.v-poker .poker-error { color: var(--bad); }
+.v-poker .poker-grid { display: grid; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); gap: 14px; align-items: start; }
+.v-poker .poker-queue { display: flex; flex-direction: column; gap: 8px; position: sticky; top: calc(var(--bar-h) + 8px); max-height: calc(100vh - var(--bar-h) - 40px); }
+.v-poker .poker-queue-list { overflow: auto; display: flex; flex-direction: column; gap: 2px; }
+.v-poker .poker-story { display: flex; align-items: baseline; gap: 6px; text-align: left; font: inherit; font-size: 13px; color: var(--ink); background: none; border: 0; border-radius: 6px; padding: 5px 6px; cursor: pointer; }
+.v-poker .poker-story:hover:not(:disabled) { background: var(--soft); }
+.v-poker .poker-story.on { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+.v-poker .poker-story .t { flex: 1; min-width: 0; }
+.v-poker .poker-est { font: 600 11px var(--mono); background: var(--soft); border-radius: 4px; padding: 0 5px; }
+.v-poker .poker-stage { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.v-poker .poker-here { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.v-poker .poker-story-box h2 { font-size: 18px; margin: 6px 0; }
+.v-poker .poker-story-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12.5px; }
+.v-poker .poker-desc { max-height: 220px; overflow: auto; }
+.v-poker .poker-ac summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-top: 6px; }
+.v-poker .poker-round { display: flex; align-items: center; gap: 10px; }
+.v-poker .poker-table { display: flex; flex-wrap: wrap; gap: 14px; padding: 14px; background: color-mix(in srgb, var(--ok) 8%, var(--panel)); border: 1px solid var(--line); border-radius: 14px; min-height: 120px; align-items: flex-end; }
+.v-poker .poker-seat { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 64px; }
+.v-poker .poker-deck { display: flex; flex-wrap: wrap; gap: 8px; }
+.v-poker .poker-card { width: 52px; height: 72px; border-radius: 8px; border: 1.5px solid var(--line); background: var(--panel); color: var(--ink); font: 700 18px var(--font-head); cursor: pointer; display: grid; place-items: center; transition: transform .12s, box-shadow .12s; }
+.v-poker .poker-card:hover:not(:disabled) { transform: translateY(-4px); border-color: var(--accent); }
+.v-poker .poker-card:disabled { cursor: default; opacity: .55; }
+.v-poker .poker-card.chosen { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); transform: translateY(-6px); box-shadow: var(--shadow); opacity: 1; }
+.v-poker .poker-card.small { width: 40px; height: 56px; font-size: 15px; cursor: default; }
+.v-poker .poker-card.back { background: repeating-linear-gradient(45deg, var(--accent), var(--accent) 5px, color-mix(in srgb, var(--accent) 70%, var(--panel)) 5px, color-mix(in srgb, var(--accent) 70%, var(--panel)) 10px); border-color: var(--accent); }
+.v-poker .poker-card.empty { border-style: dashed; background: transparent; }
+.v-poker .poker-card.face { background: var(--panel); border-color: var(--ok); }
+.v-poker .poker-result { display: flex; flex-direction: column; gap: 10px; }
+.v-poker .poker-stats { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; }
+.v-poker .poker-tally { display: flex; gap: 4px; flex-wrap: wrap; }
+.v-poker .poker-consensus { color: var(--ok); font-weight: 600; }
+.v-poker .poker-spread { color: var(--warn); font-weight: 600; }
+.v-poker .poker-save { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+@media (max-width: 800px) { .v-poker .poker-grid { grid-template-columns: 1fr; } .v-poker .poker-queue { position: static; max-height: 300px; } }
+/* any agreed number, typed */
+.v-poker .poker-own-box { display: inline-flex; align-items: center; gap: 4px; margin-left: 6px; }
+.v-poker .poker-own { width: 72px; }
+.v-poker .poker-save-early { margin-top: 10px; }

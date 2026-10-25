@@ -1,0 +1,86 @@
+/* Backlog tree. */
+.tree-wrap { position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
+.tree-table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 13px; }
+.tree-table th { position: sticky; top: var(--bar-h); z-index: 2; background: var(--panel); text-align: left; font-weight: 600; color: var(--muted); font-size: 12px;
+  padding: 7px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.tree-table th:first-child { border-top-left-radius: var(--radius); }
+.tree-table th:last-child { border-top-right-radius: var(--radius); }
+.tree-table th.num, .tree-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.tree-table td { padding: 0 8px; height: 34px; border-bottom: 1px solid var(--soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
+.tree-w-title { width: auto; }
+.tree-w-state { width: 110px; } .tree-w-owner { width: 150px; } .tree-w-sprint { width: 110px; }
+.tree-w-effort { width: 70px; } .tree-w-progress { width: 130px; } .tree-w-tags { width: 160px; }
+.tree-w-score { width: 104px; }
+.tree-table th.tree-sh { padding: 0 4px; }
+.tree-sort { display: inline-flex; align-items: center; justify-content: flex-start; gap: 3px; width: 100%; padding: 7px 4px; border: 0; border-radius: 4px; background: none;
+  color: inherit; font: inherit; cursor: pointer; white-space: nowrap; }
+.tree-table th.num .tree-sort { justify-content: flex-end; }
+.tree-sort:hover { background: var(--hover); color: var(--ink); }
+.tree-table th.sorted { color: var(--accent); }
+.tree-score { font-variant-numeric: tabular-nums; }
+.tree-score.missing { color: var(--faint); cursor: help; }
+
+.tree-row { cursor: pointer; scroll-margin: calc(var(--bar-h) + 40px) 0 16px; }
+.tree-row:hover td { background: var(--hover); }
+.tree-row.selected td, .tree-row.picked td { background: var(--accent-soft); }
+.tree-row.selected td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+.tree-row.picked td:first-child { box-shadow: inset 3px 0 0 color-mix(in srgb, var(--accent) 55%, transparent); }
+/* the keyboard's row */
+.tree-row:focus { outline: none; }
+.tree-row:focus-visible td { box-shadow: inset 0 2px 0 var(--accent), inset 0 -2px 0 var(--accent); }
+.tree-row:focus-visible td:first-child { box-shadow: inset 2px 2px 0 var(--accent), inset 0 -2px 0 var(--accent); }
+.tree-row:focus-visible td:last-child { box-shadow: inset -2px 2px 0 var(--accent), inset 0 -2px 0 var(--accent); }
+.tree-row.flash td { animation: tree-flash 1.6s ease-out; }
+@keyframes tree-flash { 0%, 40% { background: color-mix(in srgb, var(--accent) 28%, var(--panel)); } }
+.tree-picked:not([hidden]), .tree-hint { display: inline-flex; align-items: center; gap: 2px; }
+.tree-row.ctx td { color: var(--muted); }
+.tree-row.ctx .tree-t { opacity: .7; }
+.tree-row.closed .tree-t { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--faint); }
+.tree-k-portfolio .tree-t { font-weight: 600; }
+.tree-cell { display: flex; align-items: center; gap: 4px; min-width: 0; padding-left: calc(var(--d, 0) * 18px); }
+.tree-cell .type-mark { margin-right: 2px; }
+.tree-id { flex: none; font-size: 12px; }
+.tree-t { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-chev { flex: none; display: inline-grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--muted); cursor: pointer; visibility: hidden; }
+.tree-chev .icon { transition: transform .12s; }
+.tree-chev:hover { background: var(--soft); color: var(--ink); }
+.tree-row.has-kids .tree-chev { visibility: visible; }
+.tree-row.open .tree-chev .icon { transform: rotate(90deg); }
+.tree-add { flex: none; display: inline-grid; place-items: center; width: 22px; height: 22px; padding: 0; margin-left: 4px; border: 1px solid var(--line); border-radius: 5px;
+  background: var(--panel); color: var(--muted); cursor: pointer; opacity: 0; }
+.tree-row:hover .tree-add, .tree-row:focus .tree-add, .tree-add:focus-visible { opacity: 1; }
+.tree-add:hover { color: var(--accent); border-color: var(--accent); }
+.tree-more { flex: none; display: inline-grid; place-items: center; width: 22px; height: 22px; padding: 0; margin-left: 2px; border: 0; border-radius: 5px;
+  background: none; color: var(--muted); cursor: pointer; opacity: 0; }
+.tree-row:hover .tree-more, .tree-row:focus .tree-more, .tree-row.picked .tree-more, .tree-more[aria-expanded="true"] { opacity: 1; }
+.tree-more:hover { background: var(--soft); color: var(--ink); }
+.tree-group td { background: var(--panel-2); }
+.tree-group-label { font-weight: 600; color: var(--muted); font-size: 12.5px; }
+.tree-owner { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
+.tree-owner span:last-child { overflow: hidden; text-overflow: ellipsis; }
+.tree-sprint { color: var(--muted); }
+.tree-rolled { color: var(--muted); }
+.tree-rolled::before { content: "Σ "; color: var(--faint); font-size: 11px; }
+.tree-prog { display: flex; align-items: center; gap: 6px; }
+.tree-bar { flex: 1; height: 6px; border-radius: 3px; background: var(--soft); overflow: hidden; min-width: 40px; }
+.tree-bar i { display: block; height: 100%; background: var(--ok); border-radius: 3px; }
+.tree-tags .tag { margin-right: 3px; }
+
+/* drag and drop */
+body.tree-dragging, body.tree-dragging * { cursor: grabbing !important; user-select: none; }
+body.tree-dragging.tree-no-drop, body.tree-dragging.tree-no-drop * { cursor: no-drop !important; }
+.tree-row.dragged td { opacity: .4; }
+.tree-row.drop-into td { background: var(--accent-soft); }
+.tree-row.drop-into td:first-child { box-shadow: inset 0 0 0 2px var(--drop); }
+.tree-drop-line { position: absolute; right: 8px; height: 3px; border-radius: 2px; background: var(--drop); pointer-events: none; z-index: 3; }
+.tree-drop-line::before { content: ""; position: absolute; left: -4px; top: -3px; width: 9px; height: 9px; border-radius: 50%; background: var(--drop); }
+.tree-ghost { position: fixed; left: 0; top: 0; z-index: 300; pointer-events: none; max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; box-shadow: var(--shadow); padding: 4px 10px; font-size: 13px; }
+
+@media (max-width: 900px) { .tree-w-tags, .tree-w-sprint { visibility: collapse; width: 0; } .tree-w-owner { width: 40px; } }
+
+/* one level as a flat list: no indent, no chevron, the parent after the title */
+.tree-row.flat .tree-cell { padding-left: 0; }
+.tree-row.flat .tree-chev { display: none; }
+.tree-parent { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-row:not(.flat) .tree-parent { display: none; }

@@ -1,0 +1,44 @@
+{
+  "manifestVersion": 1,
+  "id": "flowboards",
+  "publisher": "volodymyrusov",
+  "version": "1.2.0",
+  "name": "Flowboards: story map, roadmap, flow",
+  "description": "A story map board, backlog tree, roadmap, dependencies, calendar, a story scheduler, sprint planning, flow metrics, pull requests, health checks and tag tidying for your team. Free and open source.",
+  "public": true,
+  "categories": ["Azure Boards"],
+  "tags": ["story map", "kanban", "roadmap", "dependencies", "sprint planning", "flow metrics", "cycle time", "forecast", "pull requests", "health check", "tags"],
+  "targets": [{ "id": "Microsoft.VisualStudio.Services.Cloud" }],
+  "icons": { "default": "images/icon.png" },
+  "content": {
+    "details": { "path": "overview.md" },
+    "license": { "path": "LICENSE" }
+  },
+  "links": {
+    "repository": { "uri": "https://github.com/Volodymyr-Usov/flowboards" },
+    "issues": { "uri": "https://github.com/Volodymyr-Usov/flowboards/issues" },
+    "support": { "uri": "https://github.com/Volodymyr-Usov/flowboards/issues" },
+    "privacypolicy": { "uri": "https://github.com/Volodymyr-Usov/flowboards/blob/main/docs/PRIVACY.md" },
+    "license": { "uri": "https://github.com/Volodymyr-Usov/flowboards/blob/main/LICENSE" }
+  },
+  "repository": { "type": "git", "uri": "https://github.com/Volodymyr-Usov/flowboards" },
+  "scopes": ["vso.work_write", "vso.code", "vso.project", "vso.graph"],
+  "files": [
+    { "path": "dist/index.html", "addressable": true },
+    { "path": "images", "addressable": true }
+  ],
+  "contributions": [
+    {
+      "id": "flowboards-hub",
+      "type": "ms.vss-web.hub",
+      "description": "Flowboards: story map, roadmap, flow and checks for a team.",
+      "targets": ["ms.vss-work-web.work-hub-group"],
+      "properties": {
+        "name": "Flowboards",
+        "uri": "dist/index.html",
+        "iconName": "ViewDashboard",
+        "order": 25
+      }
+    }
+  ]
+}

@@ -1,0 +1,100 @@
+/* Calendar: a month grid with sprint bands across each week, and a side list of items without a date. */
+.v-calendar .cal-nav { display: flex; align-items: center; gap: 4px; }
+.v-calendar .cal-flip { display: inline-grid; transform: rotate(180deg); }
+.v-calendar .cal-title { min-width: 150px; margin-left: 6px; }
+.v-calendar .cal-layout { display: grid; grid-template-columns: minmax(0, 1fr) 270px; gap: 12px; align-items: start; }
+@media (max-width: 1000px) { .v-calendar .cal-layout { grid-template-columns: minmax(0, 1fr); } }
+
+/* month */
+.v-calendar .cal-month { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.v-calendar .cal-dows, .v-calendar .cal-week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.v-calendar .cal-dows { background: var(--panel-2); border-bottom: 1px solid var(--line); }
+.v-calendar .cal-dow { padding: 4px 8px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.v-calendar .cal-dow.off { color: var(--faint); font-weight: 400; }
+.v-calendar .cal-week { position: relative; min-height: 112px; border-bottom: 1px solid var(--line); }
+.v-calendar .cal-week:last-child { border-bottom: 0; }
+.v-calendar .cal-bg { grid-row: 1 / -1; border-right: 1px solid var(--soft); }
+.v-calendar .cal-bg:nth-child(7) { border-right: 0; }
+.v-calendar .cal-bg.off { background: var(--panel-2); }
+.v-calendar .cal-bg.out { background: color-mix(in srgb, var(--panel-2) 60%, var(--bg)); }
+.v-calendar .cal-bg.today { background: var(--accent-soft); }
+.v-calendar .cal-bg.drop { background: var(--accent-soft); box-shadow: inset 0 0 0 2px var(--drop); }
+.v-calendar .cal-num { position: relative; display: flex; align-items: center; gap: 6px; padding: 3px 7px 2px; font-size: 12px; color: var(--ink); }
+.v-calendar .cal-num.out { color: var(--faint); }
+.v-calendar .cal-num.today { color: var(--accent); font-weight: 700; }
+.v-calendar .cal-today-word { font-size: 10px; letter-spacing: .05em; text-transform: uppercase; color: var(--accent-ink); background: var(--accent); border-radius: 3px; padding: 0 4px; }
+.v-calendar .cal-band { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 6px; min-width: 0; height: 18px; margin: 1px 0;
+  padding: 0 6px; font-size: 11px; color: var(--muted); background: var(--soft); white-space: nowrap; overflow: hidden; }
+.v-calendar .cal-band .n { overflow: hidden; text-overflow: ellipsis; }
+.v-calendar .cal-band .e { flex: none; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
+.v-calendar .cal-band.start { margin-left: 4px; border-left: 3px solid var(--faint); border-radius: 3px 0 0 3px; }
+.v-calendar .cal-band.end { margin-right: 4px; border-radius: 0 9px 9px 0; }
+.v-calendar .cal-band.start.end { border-radius: 3px 9px 9px 3px; }
+.v-calendar .cal-band.current { color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+.v-calendar .cal-band.current.start { border-left-color: var(--accent); }
+.v-calendar .cal-items { position: relative; display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 2px 4px 6px; }
+.v-calendar .cal-more { align-self: flex-start; padding: 0 4px; border: 0; background: none; color: var(--accent); font: inherit; font-size: 11.5px; cursor: pointer; }
+.v-calendar .cal-more:hover { text-decoration: underline; }
+
+/* chips (also in the "more" popup, which lives on <body>) */
+.v-calendar .cal-chip, .calendar-pop .cal-chip { display: flex; align-items: center; gap: 4px; width: 100%; min-width: 0; padding: 1px 6px 1px 5px; font: inherit; font-size: 11.5px; line-height: 1.5; text-align: left;
+  color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--c); border-radius: 4px; cursor: pointer; }
+.v-calendar .cal-chip[draggable="true"], .calendar-pop .cal-chip[draggable="true"] { cursor: grab; }
+.v-calendar .cal-chip:hover, .calendar-pop .cal-chip:hover { border-color: color-mix(in srgb, var(--c) 60%, var(--line)); border-left-color: var(--c); background: var(--soft); }
+.v-calendar .cal-chip .dot, .calendar-pop .cal-chip .dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--sc); border: 1px solid var(--line); }
+.v-calendar .cal-chip .t, .calendar-pop .cal-chip .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v-calendar .cal-chip.late, .calendar-pop .cal-chip.late { background: var(--bad-soft); border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); border-left-color: var(--bad); }
+.v-calendar .cal-chip.late .t, .calendar-pop .cal-chip.late .t { color: var(--bad); }
+.v-calendar .cal-chip.done, .calendar-pop .cal-chip.done { color: var(--muted); }
+.v-calendar .cal-chip.done .t, .calendar-pop .cal-chip.done .t { text-decoration: line-through; }
+.v-calendar .cal-chip.done .icon, .calendar-pop .cal-chip.done .icon { color: var(--ok); }
+.v-calendar .cal-chip.sel, .calendar-pop .cal-chip.sel { outline: 2px solid var(--accent); outline-offset: 0; }
+.calendar-pop .cal-pop { display: flex; flex-direction: column; gap: 3px; width: 280px; }
+.calendar-pop .cal-pop-head { font-weight: 600; font-size: 12.5px; padding: 2px 2px 4px; }
+
+/* agenda */
+.v-calendar .cal-agenda { display: flex; flex-direction: column; gap: 10px; }
+.v-calendar .cal-aday { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 12px; }
+.v-calendar .cal-aday.today { border-color: var(--accent); }
+.v-calendar .cal-aday.late { border-color: color-mix(in srgb, var(--bad) 50%, var(--line)); }
+.v-calendar .cal-aday.late > h3 { color: var(--bad); }
+.v-calendar .cal-aday h3 { font-size: 13px; margin-bottom: 4px; }
+.v-calendar .cal-arow { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 3px 0; border-top: 1px solid var(--soft); font-size: 13px; }
+.v-calendar .cal-aday h3 + .cal-arow { border-top: 0; }
+.v-calendar .cal-arow.sel { background: var(--accent-soft); }
+.v-calendar .cal-atitle { flex: 1; min-width: 0; padding: 0; border: 0; background: none; color: var(--ink); font: inherit; text-align: left; cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v-calendar .cal-atitle:hover { text-decoration: underline; }
+.v-calendar .cal-arow.late .cal-akind { color: var(--bad); font-weight: 600; }
+.v-calendar .cal-arow.done .cal-atitle { color: var(--muted); text-decoration: line-through; }
+.v-calendar .cal-akind { flex: none; font-size: 11.5px; color: var(--muted); min-width: 52px; }
+.v-calendar .cal-amark { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); padding: 2px 0; }
+.v-calendar .cal-amark.current { color: var(--accent); font-weight: 600; }
+
+/* without a date */
+.v-calendar .cal-side { position: sticky; top: calc(var(--bar-h) + 8px); max-height: calc(100vh - var(--bar-h) - 24px); overflow: auto; }
+.v-calendar .cal-side h3 { display: flex; align-items: center; gap: 2px; margin-bottom: 8px; }
+.v-calendar .cal-side-list { display: flex; flex-direction: column; gap: 3px; }
+.v-calendar .cal-side-list .cal-chip { font-size: 12.5px; padding: 3px 8px 3px 6px; }
+/* days off and team events: bands like the sprints */
+.v-calendar .cal-mark { display: flex; align-items: center; gap: 4px; min-width: 0; height: 18px; margin: 1px 2px; padding: 0 6px; border-radius: 4px; border: 0; font: inherit; font-size: 11px; cursor: pointer; overflow: hidden; white-space: nowrap; z-index: 1; }
+.v-calendar .cal-mark .n { overflow: hidden; text-overflow: ellipsis; }
+.v-calendar .cal-mark.event { background: color-mix(in srgb, var(--s4) 22%, var(--panel)); color: var(--ink); box-shadow: inset 3px 0 0 var(--s4); }
+.v-calendar .cal-mark.teamoff { background: repeating-linear-gradient(135deg, var(--soft), var(--soft) 4px, color-mix(in srgb, var(--muted) 18%, var(--panel)) 4px, color-mix(in srgb, var(--muted) 18%, var(--panel)) 8px); color: var(--ink); }
+.v-calendar .cal-mark.off { background: color-mix(in srgb, var(--warn) 16%, var(--panel)); color: var(--ink); box-shadow: inset 3px 0 0 var(--warn); }
+.v-calendar .cal-ini { font: 700 9.5px var(--mono); background: var(--panel); border-radius: 3px; padding: 0 3px; color: var(--muted); }
+.v-calendar .cal-aoffs { display: flex; flex-wrap: wrap; gap: 4px; margin: 2px 0 4px; }
+.v-calendar .cal-aoffs .cal-mark { margin: 0; }
+/* click a day to add; drop on "Without a date" to clear a date */
+.v-calendar .cal-week.addable .cal-bg, .v-calendar .cal-week.addable .cal-num { cursor: pointer; }
+.v-calendar .cal-week.addable .cal-bg:hover:not(.drop) { background: color-mix(in srgb, var(--accent-soft) 55%, transparent); }
+.v-calendar .cal-side.drop { border-color: var(--drop); box-shadow: 0 0 0 2px var(--drop) inset; background: var(--accent-soft); }
+.calendar-pop .cal-pop-btns { display: flex; gap: 6px; }
+.cal-sum { margin: 0; color: var(--muted); min-height: 1.3em; }
+.cal-sum.err { color: var(--bad); }
+/* stories the Scheduler makes: small icons at the top of the day */
+.v-calendar .cal-scheds { display: flex; flex-wrap: wrap; gap: 3px; }
+.v-calendar .cal-sched { display: inline-grid; place-items: center; width: 20px; height: 18px; padding: 0; border: 1px dashed color-mix(in srgb, var(--accent) 60%, var(--line)); border-radius: 4px; background: var(--accent-soft); color: var(--accent); cursor: pointer; }
+.v-calendar .cal-sched:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.v-calendar .cal-sched.made { border-style: solid; opacity: .6; }
+.v-calendar .cal-amark.sched { display: flex; align-items: center; gap: 6px; }

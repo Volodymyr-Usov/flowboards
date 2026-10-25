@@ -1,0 +1,56 @@
+/* Colors and type. Light and dark follow Azure DevOps' theme (or the person's choice in the top bar).
+   Views use these tokens only, never raw colors, so both themes stay right. */
+:root {
+  --font: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --font-head: "Segoe UI Semibold", "Segoe UI", system-ui, sans-serif;
+  --mono: "Cascadia Mono", "SF Mono", ui-monospace, Consolas, monospace;
+  --radius: 8px;
+  --bar-h: 48px;
+
+  --bg: #f3f5f8; --panel: #ffffff; --panel-2: #f7f8fa; --card: #f7f8fa; --ink: #18202e; --muted: #5b6578; --faint: #8a93a5;
+  --line: #d9dee7; --soft: #eaeef4; --hover: rgb(24 32 46 / .05);
+  --accent: #1d6fb8; --accent-ink: #ffffff; --accent-soft: rgb(29 111 184 / .1);
+  --key-top: #2f6db5; --key-bot: #173f78; --key-edge: #0f2d5a;
+  --hit: #e0a800;
+  --ok: #2f8f5b; --warn: #b98a00; --bad: #c8372d; --info: #1d6fb8;
+  --ok-soft: rgb(47 143 91 / .12); --warn-soft: rgb(185 138 0 / .14); --bad-soft: rgb(200 55 45 / .12);
+  --wire: #b4bfcf; --wire-hot: #1d6fb8; --drop: #1d6fb8;
+  --feat: #e3edf9; --feat-line: #8fb0d8; --epic: #c8660f; --epic-soft: rgb(200 102 15 / .08);
+  --menu: #1d2a40; --menu-ink: #ffffff; --menu-muted: #b6c2d6;
+  --shadow: 0 10px 30px rgb(15 20 30 / .18);
+  --s1: #1f6fd1; --s2: #c2410c; --s3: #0f8a6a; --s4: #7c3aed; --s5: #a16207; --s6: #be185d; --s7: #4d7c0f; --s8: #64748b;
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --bg: #0f131a; --panel: #171d28; --panel-2: #1b2230; --card: #222a3a; --ink: #e7ebf3; --muted: #9ba5b9; --faint: #6f7a90;
+  --line: #2b3446; --soft: #202838; --hover: rgb(255 255 255 / .05);
+  --accent: #5fa8f0; --accent-ink: #0f131a; --accent-soft: rgb(95 168 240 / .14);
+  --key-top: #3d7bc4; --key-bot: #1f4c8c; --key-edge: #0a1d3c;
+  --hit: #ffd43b;
+  --ok: #6fd39a; --warn: #f0c94a; --bad: #f06a5f; --info: #5fa8f0;
+  --ok-soft: rgb(111 211 154 / .13); --warn-soft: rgb(240 201 74 / .13); --bad-soft: rgb(240 106 95 / .14);
+  --wire: #3a4660; --wire-hot: #5fa8f0; --drop: #5fa8f0;
+  --feat: #1c2a40; --feat-line: #3f6596; --epic: #e08a3c; --epic-soft: rgb(224 138 60 / .1);
+  --menu: #1a2335; --menu-ink: #f1f4fa; --menu-muted: #a3aec4;
+  --shadow: 0 12px 36px rgb(0 0 0 / .5);
+  --s1: #5b9cf0; --s2: #f08a4b; --s3: #2fbf8f; --s4: #a07ef0; --s5: #d9a521; --s6: #e8609b; --s7: #8fbf3a; --s8: #8a98ad;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 var(--font); -webkit-font-smoothing: antialiased; }
+h1, h2, h3, h4 { font-family: var(--font-head); font-weight: 600; margin: 0; text-wrap: balance; }
+h1 { font-size: 20px; } h2 { font-size: 16px; } h3 { font-size: 14px; }
+a { color: var(--accent); text-underline-offset: 2px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: .92em; }
+.muted { color: var(--muted); }
+.faint { color: var(--faint); }
+.small { font-size: 12px; }
+.pad { padding: 12px; }
+.spacer { flex: 1; }
+.ok { color: var(--ok); } .err { color: var(--bad); } .warn-text { color: var(--warn); }
+.icon { flex: none; display: inline-block; vertical-align: -3px; }
+mark { background: color-mix(in srgb, var(--warn) 40%, transparent); color: inherit; border-radius: 2px; padding: 0 1px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }

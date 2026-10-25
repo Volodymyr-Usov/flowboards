@@ -1,0 +1,85 @@
+/* Dependencies graph. */
+.v-deps .deps-legend { display: inline-flex; align-items: center; gap: 4px; }
+.v-deps .deps-lg-line { display: inline-block; width: 18px; height: 2px; background: var(--wire); margin-left: 6px; }
+.v-deps .deps-lg-line.bad { background: var(--bad); }
+.v-deps .deps-lg-node { display: inline-block; width: 14px; height: 10px; border-radius: 3px; border: 1px dashed var(--faint); margin-left: 6px; }
+
+.v-deps .deps-main { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 12px; height: calc(100vh - var(--bar-h) - 170px); min-height: 380px; }
+.v-deps .deps-canvas { position: relative; overflow: hidden; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); cursor: grab; touch-action: none; }
+.v-deps .deps-canvas.panning { cursor: grabbing; }
+.v-deps .deps-canvas.linking { cursor: crosshair; }
+.v-deps .deps-svg { display: block; width: 100%; height: 100%; user-select: none; }
+.v-deps .deps-zoom { position: absolute; right: 8px; bottom: 8px; display: flex; align-items: center; gap: 2px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 2px 4px; box-shadow: var(--shadow); }
+.v-deps .deps-zoom-n { min-width: 38px; text-align: center; }
+.v-deps .deps-minus { font-size: 16px; line-height: 1; }
+
+/* edges */
+.v-deps .deps-edge { fill: none; stroke: var(--wire); stroke-width: 1.8; transition: opacity .12s; }
+.v-deps .deps-edge.bad { stroke: var(--bad); stroke-width: 2.2; }
+.v-deps .deps-edge-hit { fill: none; stroke: transparent; stroke-width: 12; cursor: pointer; }
+.v-deps .deps-edge-hit:hover { stroke: var(--accent-soft); }
+.v-deps .deps-head { fill: var(--wire); }
+.v-deps .deps-head.bad { fill: var(--bad); }
+.v-deps .deps-head.hot { fill: var(--wire-hot); }
+.v-deps .deps-temp { fill: none; stroke: var(--drop); stroke-width: 2; stroke-dasharray: 6 4; pointer-events: none; }
+.v-deps .deps-none { fill: var(--muted); font-size: 14px; }
+
+/* nodes */
+.v-deps .deps-node { cursor: pointer; outline: none; transition: opacity .12s; }
+.v-deps .deps-card { fill: var(--panel-2); }
+.v-deps .deps-frame { fill: none; stroke: var(--line); stroke-width: 1.2; }
+.v-deps .deps-node:hover .deps-frame, .v-deps .deps-node:focus-visible .deps-frame { stroke: var(--accent); stroke-width: 1.6; }
+.v-deps .deps-node.selected .deps-frame { stroke: var(--accent); stroke-width: 2.5; }
+.v-deps .deps-node.bad .deps-frame { stroke: var(--bad); stroke-width: 2; }
+.v-deps .deps-node.bad .deps-card { fill: var(--bad-soft); }
+.v-deps .deps-node.outside { opacity: .62; }
+.v-deps .deps-node.outside .deps-frame { stroke-dasharray: 5 3; stroke: var(--faint); }
+.v-deps .deps-node.done .deps-title { fill: var(--muted); }
+.v-deps .deps-id { font-family: var(--mono); font-size: 11px; fill: var(--muted); }
+.v-deps .deps-type { font-family: var(--font); fill: var(--faint); }
+.v-deps .deps-title { font-size: 12.5px; fill: var(--ink); font-weight: 600; }
+.v-deps .deps-state { font-size: 11px; fill: var(--muted); }
+.v-deps .deps-date { fill: var(--muted); }
+.v-deps .deps-date.bad { fill: var(--bad); font-weight: 600; }
+.v-deps .deps-warn { font-size: 14px; font-weight: 700; fill: var(--bad); }
+.v-deps .deps-owner circle { fill: var(--soft); stroke: var(--line); }
+.v-deps .deps-owner text { font-size: 9.5px; font-weight: 600; fill: var(--ink); text-anchor: middle; }
+.v-deps .deps-handle { fill: var(--panel); stroke: var(--accent); stroke-width: 2; opacity: 0; cursor: crosshair; transition: opacity .1s; }
+.v-deps .deps-node:hover .deps-handle, .v-deps .deps-canvas.linking .deps-handle { opacity: 1; }
+.v-deps .deps-node.link-target .deps-frame { stroke: var(--drop); stroke-width: 3; }
+.v-deps .deps-node.link-no .deps-frame { stroke: var(--bad); stroke-width: 3; stroke-dasharray: 4 3; }
+.v-deps .deps-node.pulse .deps-frame { animation: deps-pulse 1.2s ease-out 2; }
+@keyframes deps-pulse { 50% { stroke: var(--accent); stroke-width: 5; } }
+
+/* hover: the chain stays, the rest fades */
+.v-deps .deps-canvas.hovering .deps-node:not(.hl) { opacity: .25; }
+.v-deps .deps-canvas.hovering .deps-edge:not(.hl) { opacity: .15; }
+.v-deps .deps-edge.hl:not(.bad) { stroke: var(--wire-hot); stroke-width: 2.4; }
+.v-deps .deps-edge.hl.bad { stroke-width: 2.8; }
+
+/* side list */
+.v-deps .deps-side { overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px; }
+.v-deps .deps-sec + .deps-sec { border-top: 1px solid var(--soft); margin-top: 10px; padding-top: 10px; }
+.v-deps .deps-sec h3 { font-size: 13px; margin-bottom: 6px; }
+.v-deps .deps-sec.bad h3 { color: var(--bad); }
+.v-deps .deps-sec p { margin: 0 0 6px; }
+.v-deps .deps-sec ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.v-deps .deps-sec li .btn.link { padding: 0 2px; font-family: var(--mono); font-size: 12px; }
+.v-deps .deps-side-item { display: flex; align-items: center; gap: 4px; width: 100%; font: inherit; font-size: 13px; text-align: left; border: 0; background: none; color: var(--ink); padding: 2px 4px; margin: 0 -4px; border-radius: 5px; cursor: pointer; min-width: 0; }
+.v-deps .deps-side-item:hover { background: var(--soft); }
+.v-deps .deps-side-item .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.v-deps .deps-side-item + div { padding-left: 9px; }
+
+/* "+ Dependency" dialog (lives on <body>) */
+.dep-form { display: flex; flex-direction: column; gap: 10px; min-width: min(460px, 80vw); }
+.dep-form p { margin: 0; }
+.dep-row { display: grid; grid-template-columns: 80px minmax(0, 1fr); align-items: center; gap: 8px; }
+.dep-lbl { font-weight: 600; font-size: 13px; }
+.dep-pick { display: flex; align-items: center; gap: 6px; justify-content: flex-start; min-width: 0; text-align: left; }
+.dep-pick .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+
+@media (max-width: 900px) {
+  .v-deps .deps-main { grid-template-columns: 1fr; height: auto; }
+  .v-deps .deps-canvas { height: 70vh; }
+  .v-deps .deps-side { max-height: none; }
+}

@@ -1,0 +1,53 @@
+/* Flow view: stat tiles, chart cards and the forecast. */
+.v-flow .flow-body { transition: opacity .15s; }
+.v-flow .flow-body.flow-dim { opacity: .5; pointer-events: none; }
+.v-flow .flow-tiles { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 150px), 1fr)); margin-bottom: 12px; }
+.v-flow .flow-tile { text-align: left; font: inherit; color: inherit; }
+.v-flow .flow-tile .n { font-variant-numeric: normal; font-size: 28px; }
+.v-flow button.flow-tile { cursor: pointer; }
+.v-flow button.flow-tile:hover { background: var(--soft); }
+.v-flow .flow-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 460px), 1fr)); margin-bottom: 12px; }
+.v-flow .flow-card { display: flex; flex-direction: column; }
+.v-flow .flow-card-head { display: flex; align-items: center; gap: 8px; }
+.v-flow .flow-sub { margin: 2px 0 8px; color: var(--muted); font-size: 12.5px; }
+.v-flow .flow-chart { width: 100%; min-height: 40px; }
+.v-flow .flow-none { padding: 32px 0; text-align: center; }
+.v-flow .flow-dot { stroke: var(--panel); stroke-width: 2; transition: r .1s; pointer-events: none; }
+.v-flow .flow-dot.on { r: 7; }
+.v-flow .flow-dot.sel { stroke: var(--ink); stroke-width: 2; r: 7; }
+.v-flow .flow-tipnote { color: var(--muted); margin-top: 3px; font-size: 11.5px; }
+.v-flow .flow-fc { display: grid; gap: 12px 24px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); }
+.v-flow .flow-fc-q { min-width: 0; }
+.v-flow .flow-q { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-weight: 600; font-size: 14px; margin-bottom: 6px; }
+.v-flow .flow-n { width: 80px; }
+.v-flow .flow-answers { list-style: none; margin: 0 0 6px; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 20px; }
+.v-flow .flow-answers li { display: flex; flex-direction: column; }
+.v-flow .flow-answers b { font-size: 15px; }
+.v-flow .flow-p { color: var(--muted); font-size: 12px; }
+/* the items behind a bar or a band */
+.v-flow .flow-click { cursor: pointer; }
+.flow-spot { position: fixed; width: 0; height: 0; pointer-events: none; }
+.flow-pop { max-width: min(460px, calc(100vw - 32px)); max-height: min(420px, 70vh); overflow: auto; }
+.flow-items { display: flex; flex-direction: column; gap: 6px; padding: 4px 2px; }
+.flow-items ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.flow-items .item-link { font-size: 12.5px; }
+.v-flow .flow-cfd-sub { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.v-flow .flow-cfd-sub .segmented { font-size: 12px; }
+.v-flow .flow-period { display: inline-flex; align-items: center; gap: 6px; }
+.v-flow .flow-weeks { width: 64px; }
+/* the pull request times (also drawn on the Pull requests page) */
+.v-flow .flow-prs .spacer { flex: 1; }
+.v-flow .flow-scope { margin: 0 0 8px; }
+.v-flow .prs-times-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin-top: 6px; }
+.v-flow .prs-key { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.v-flow .prs-key i { width: 14px; height: 3px; border-radius: 2px; }
+.v-flow .prs-key.ap i { background: var(--warn); } .v-flow .prs-key.mg i { background: var(--accent); }
+.v-flow .prs-times-chart { width: 100%; max-height: 190px; display: block; margin-top: 6px; }
+.v-flow .prs-grid { stroke: var(--soft); stroke-width: 1; }
+.v-flow .prs-line { fill: none; stroke-width: 2.2; }
+.v-flow .prs-line.ap, .v-flow .prs-dot.ap { stroke: var(--warn); } .v-flow .prs-line.mg, .v-flow .prs-dot.mg { stroke: var(--accent); }
+.v-flow .prs-dot { fill: var(--panel); stroke-width: 2; }
+.v-flow .prs-val { fill: var(--ink); font-size: 10px; font-variant-numeric: tabular-nums; } .v-flow .prs-val.ap { fill: var(--warn); } .v-flow .prs-val.mg { fill: var(--accent); }
+.v-flow .prs-axis { fill: var(--muted); font-size: 9px; }
+.v-flow .flow-scope-note { display: flex; gap: 8px; align-items: flex-start; margin: 10px 0 0; padding: 8px 12px; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line)); border-radius: 8px; background: var(--accent-soft); font-size: 12.5px; }
+.v-flow .flow-scope-note .icon { flex: none; margin-top: 2px; color: var(--accent); }

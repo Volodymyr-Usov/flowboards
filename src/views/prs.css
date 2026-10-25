@@ -1,0 +1,101 @@
+/* Pull requests view */
+.v-prs .prs-filters { display: contents; }
+.v-prs .prs-status { display: inline-flex; align-items: center; gap: 6px; min-height: 20px; }
+.v-prs .prs-status .spin { width: 12px; height: 12px; }
+.v-prs .prs-tiles { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 170px), 1fr)); margin-bottom: 12px; }
+.v-prs .prs-tile { text-align: left; font: inherit; color: inherit; min-width: 0; }
+.v-prs .prs-tile.click { cursor: pointer; }
+.v-prs .prs-tile.click:hover { background: var(--soft); }
+.v-prs .prs-tile[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.v-prs .prs-tile .n.ok { color: var(--ok); }
+.v-prs .prs-tile .n.warn { color: var(--warn); }
+.v-prs .prs-tile .n.bad { color: var(--bad); }
+.v-prs .prs-oldest { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+.v-prs .prs-chartbox { grid-column: span 2; min-width: 0; }
+@media (max-width: 600px) { .v-prs .prs-chartbox { grid-column: auto; } }
+.v-prs .prs-chart { width: 100%; height: auto; max-height: 120px; display: block; }
+.v-prs .prs-bar { fill: var(--s1); }
+.v-prs .prs-val { fill: var(--ink); font-size: 10px; font-variant-numeric: tabular-nums; }
+.v-prs .prs-axis { fill: var(--muted); font-size: 9px; }
+.v-prs .prs-base { stroke: var(--line); stroke-width: 1; }
+.v-prs .prs-tablebox { padding: 4px 6px; overflow-x: auto; }
+.v-prs .prs-split { display: grid; gap: 12px; grid-template-columns: minmax(240px, 1fr) 3fr; align-items: start; }
+@media (max-width: 1000px) { .v-prs .prs-split { grid-template-columns: 1fr; } }
+.v-prs .prs-h { padding: 8px 8px 4px; }
+.v-prs .prs-table td { vertical-align: middle; }
+.v-prs .prs-pr { min-width: 260px; max-width: 520px; }
+.v-prs .prs-line { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.v-prs .prs-title { color: var(--ink); text-decoration: none; font-weight: 600; }
+.v-prs .prs-title:hover { text-decoration: underline; color: var(--accent); }
+.v-prs .prs-sub { display: flex; gap: 4px 10px; flex-wrap: wrap; margin-top: 2px; }
+.v-prs .prs-branch { overflow-wrap: anywhere; }
+.v-prs .prs-draft { color: var(--muted); border-style: dashed; }
+.v-prs .prs-team { background: var(--accent-soft); color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
+.v-prs .prs-person, .v-prs .prs-wait { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.v-prs .prs-wait .avatar + .avatar { margin-left: -8px; box-shadow: 0 0 0 2px var(--panel); }
+.v-prs .prs-wait.author { color: var(--warn); font-size: 12px; }
+.v-prs .prs-name { font-size: 12.5px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
+.v-prs .prs-age { font-weight: 600; font-variant-numeric: tabular-nums; }
+.v-prs .prs-age.ok { color: var(--ok); }
+.v-prs .prs-age.warn { color: var(--warn); }
+.v-prs .prs-age.bad { color: var(--bad); }
+.v-prs .prs-revs { display: flex; flex-wrap: wrap; gap: 4px; }
+.v-prs .prs-rev { position: relative; display: inline-flex; border-radius: 50%; }
+.v-prs .prs-rev.req { box-shadow: 0 0 0 2px var(--panel), 0 0 0 3px var(--muted); }
+.v-prs .prs-vote { position: absolute; right: -3px; bottom: -3px; width: 13px; height: 13px; border-radius: 50%; display: grid; place-items: center;
+  font-size: 9px; font-weight: 700; line-height: 1; color: var(--panel); box-shadow: 0 0 0 1.5px var(--panel); }
+.v-prs .prs-vote.approved { background: var(--ok); }
+.v-prs .prs-vote.suggestions { background: color-mix(in srgb, var(--ok) 65%, var(--warn)); }
+.v-prs .prs-vote.waiting { background: var(--warn); }
+.v-prs .prs-vote.rejected { background: var(--bad); }
+.v-prs .prs-merge { white-space: nowrap; }
+.v-prs .prs-wi { min-width: 180px; max-width: 340px; }
+.v-prs .prs-wis, .v-prs .prs-cands { display: flex; flex-direction: column; gap: 3px; }
+.v-prs .prs-wl, .v-prs .prs-cand { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 6px; min-width: 0; }
+.v-prs .prs-wid { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; font-size: 12px; color: var(--accent); text-decoration: none; }
+.v-prs .prs-wid:hover { text-decoration: underline; }
+.v-prs .prs-wid.ext { color: var(--muted); }
+.v-prs .prs-wtitle { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
+.v-prs .prs-wid.ext .prs-wtitle { color: var(--muted); }
+.v-prs .prs-via { font-size: 11px; white-space: nowrap; }
+.v-prs .prs-cands-head { color: var(--warn); }
+.v-prs .prs-cand { padding-left: 6px; border-left: 2px solid var(--line); }
+.v-prs .prs-why { font-size: 11px; white-space: nowrap; }
+.v-prs .prs-linkbtn { padding: 1px 8px; gap: 4px; }
+/* the "New pull request" popup sits outside the view */
+.prs-new { display: flex; flex-direction: column; gap: 10px; width: min(340px, calc(100vw - 32px)); padding: 4px; }
+.prs-new h3 { margin: 0; }
+.prs-new p { margin: 0; }
+.prs-new-field { display: flex; flex-direction: column; gap: 4px; }
+.prs-new-field > span:first-child { font-size: 12px; color: var(--muted); }
+.prs-new-field .input { width: 100%; }
+.prs-new-foot { display: flex; justify-content: flex-end; }
+.prs-new-foot .btn { text-decoration: none; }
+.v-prs .prs-sort { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+.v-prs .prs-sort:hover { color: var(--ink); }
+
+/* the chart on top: wait for the first approval and time to merge, per week */
+.v-prs .prs-times { margin-bottom: 12px; }
+.v-prs .prs-times-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+.v-prs .prs-times-head .spacer { flex: 1; }
+.v-prs .prs-key { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.v-prs .prs-key i { width: 14px; height: 3px; border-radius: 2px; }
+.v-prs .prs-key.ap i { background: var(--warn); } .v-prs .prs-key.mg i { background: var(--accent); }
+.v-prs .prs-times-chart { width: 100%; max-height: 190px; display: block; margin-top: 6px; }
+.v-prs .prs-grid { stroke: var(--soft); stroke-width: 1; }
+.v-prs .prs-line { fill: none; stroke-width: 2.2; }
+.v-prs .prs-line.ap, .v-prs .prs-dot.ap { stroke: var(--warn); } .v-prs .prs-line.mg, .v-prs .prs-dot.mg { stroke: var(--accent); }
+.v-prs .prs-dot { fill: var(--panel); stroke-width: 2; }
+.v-prs .prs-val.ap { fill: var(--warn); } .v-prs .prs-val.mg { fill: var(--accent); }
+/* the actions of an open pull request */
+.v-prs .prs-acts-in { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
+.v-prs .prs-acts { white-space: nowrap; }
+/* read again, link to any work item, take a link off */
+.v-prs .prs-reread { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
+.v-prs .prs-reread:hover { color: var(--accent); }
+.v-prs .prs-wait.done { color: var(--ok); font-size: 12px; }
+.v-prs .prs-unlink { opacity: .45; padding: 1px; }
+.v-prs .prs-wl:hover .prs-unlink, .v-prs .prs-unlink:focus-visible { opacity: 1; }
+.v-prs .prs-linkmore { align-self: flex-start; display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; padding: 0; }
+.prs-linkpick { display: flex; flex-direction: column; gap: 6px; }
+.v-prs .prs-more { display: flex; align-items: center; gap: 12px; padding: 10px 2px; }

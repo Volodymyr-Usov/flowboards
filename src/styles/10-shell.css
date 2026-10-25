@@ -1,0 +1,160 @@
+/* The frame: top bar with the view tabs, and the view area below it. */
+#app { min-height: 100%; display: flex; flex-direction: column; }
+.boot { flex: 1; display: grid; place-items: center; min-height: 60vh; }
+.topbar { position: sticky; top: 0; z-index: 50; height: var(--bar-h); display: flex; align-items: center; gap: 8px;
+  padding: 0 10px 0 6px; background: var(--menu); color: var(--menu-ink); }
+.tabs { flex: 1; min-width: 0; display: flex; align-items: stretch; gap: 2px; overflow: hidden; height: 100%; }
+.tab.over { display: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab { display: flex; align-items: center; gap: 6px; padding: 0 10px; color: var(--menu-muted); text-decoration: none; white-space: nowrap; border-bottom: 2px solid transparent; font-size: 13px; }
+.tab:hover { color: var(--menu-ink); background: rgb(255 255 255 / .06); }
+.tab.active { color: var(--menu-ink); border-bottom-color: var(--accent); font-weight: 600; }
+.tab-logo { flex: none; }
+.tab-more { display: inline-flex; align-items: center; gap: 4px; flex: none; height: 30px; padding: 0 8px; border-radius: 6px; border: 1px solid rgb(255 255 255 / .16);
+  background: rgb(255 255 255 / .08); color: var(--menu-ink); font: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap; }
+.tab-more:hover { background: rgb(255 255 255 / .16); }
+/* the right part of the top bar: team, theme, Excel, Copy, settings */
+.top-tools { display: flex; align-items: center; gap: 2px; flex: none; }
+.team-btn { display: flex; align-items: center; gap: 6px; width: 140px; flex: none; min-width: 0; margin-right: 4px; background: rgb(255 255 255 / .08); color: var(--menu-ink);
+  border: 1px solid rgb(255 255 255 / .16); border-radius: 6px; padding: 4px 8px; font: inherit; font-size: 12.5px; cursor: pointer; }
+.team-btn:hover { background: rgb(255 255 255 / .16); }
+/* the team picker is a fixed width, whatever the names: the team's name is cut with … and the project is in the tooltip */
+.team-btn .tp { display: none; }
+.team-btn .tt { flex: 1; min-width: 0; text-align: left; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topbar .icon-btn { color: var(--menu-muted); }
+.topbar .icon-btn:hover { color: var(--menu-ink); background: rgb(255 255 255 / .1); }
+.topbar .top-btn.active { color: var(--menu-ink); box-shadow: inset 0 -2px 0 var(--accent); border-radius: 6px 6px 0 0; }
+.topbar .top-btn[aria-disabled="true"] { opacity: .4; cursor: default; }
+.topbar .top-btn[aria-disabled="true"]:hover { background: none; }
+/* a team so big its board is crowded: a note under the top bar */
+.big-team { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; background: var(--warn-soft); color: var(--ink); padding: 6px 16px; font-size: 12.5px; border-bottom: 1px solid var(--line); }
+.big-team > span { flex: 1; min-width: 200px; }
+/* the first page when no team is chosen yet */
+.choose-page { width: min(560px, calc(100vw - 32px)); margin: 32px auto; padding: 20px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+.choose-page h2 { margin: 0 0 6px; font-size: 18px; }
+.choose-page > p { margin: 0 0 12px; font-size: 13px; }
+.choose-note { background: var(--warn-soft); border-radius: 6px; padding: 6px 10px; color: var(--ink); }
+.demo-banner { background: var(--warn-soft); color: var(--ink); padding: 6px 16px; font-size: 12.5px; border-bottom: 1px solid var(--line); }
+.view-host { flex: 1; min-width: 0; }
+.view { padding: 14px 16px 32px; min-width: 0; }
+body.panel-open .view { margin-right: var(--panel-w, 0); }
+/* the page bar of every page (src/ui/pagebar.ts): one line: person chips, filter, the field, buttons and switches */
+.page-bar { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.page-bar { position: relative; }
+.page-bar.pb-empty { display: none; }
+.pb-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; min-width: 0; }
+.pb-3:empty, .pb-items:empty, .pb-end:empty { display: none; }
+/* a block switched off in Settings > Menu & bars (src/ui/blocks.ts); a line left with nothing shown goes too */
+[data-off] { display: none !important; }
+.pb-3:not(:has(> :not([data-off]))), .pb-items:not(:has(> :not([data-off]))), .pb-end:not(:has(> :not([data-off]))) { display: none; }
+/* the line's blocks all sit in one row (src/ui/pagebar.ts moves what does not fit into the "⋯" panel) */
+.pb-3, .pb-items, .pb-end { display: contents; }
+.pb-end > :first-child { margin-left: auto; }
+.pb-end > * { color: var(--muted); font-size: 12px; }
+.pb-more { flex: none; margin-left: 0; }
+.pb-more-panel { position: absolute; right: 0; top: calc(100% + 4px); z-index: 40; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; max-width: min(92vw, 640px); padding: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px rgb(0 0 0 / .28); }
+.pb-more-panel[hidden] { display: none; }
+.pb-more-panel > * { margin-left: 0 !important; }
+.pb-more-panel .qf { flex: none; width: min(100%, 420px); }
+.pb-line .lab { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.pb-line label.inline { display: inline-flex; align-items: center; gap: 6px; }
+.pb-sep { width: 1px; height: 22px; background: var(--line); }
+/* the field: Search | Ask AI joined to one text box */
+.qf { display: flex; align-items: stretch; flex: 0 1 400px; min-width: min(100%, 260px); }
+.qf-sides { display: flex; flex: none; border: 1px solid var(--line); border-left: 0; border-radius: 0 6px 6px 0; overflow: hidden; }
+.qf-side { display: inline-flex; align-items: center; gap: 5px; font: inherit; font-size: 12.5px; border: 0; background: var(--panel); color: var(--muted); padding: 0 9px; cursor: pointer; white-space: nowrap; }
+.qf-side + .qf-side { border-left: 1px solid var(--line); }
+.qf-side:hover { color: var(--ink); background: var(--soft); }
+.qf-side[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+.qf-side[aria-disabled="true"] { opacity: .45; cursor: default; }
+.qf-side[aria-disabled="true"]:hover { background: var(--panel); color: var(--muted); }
+.qf-box { position: relative; flex: 1; min-width: 0; display: flex; }
+.qf-input { flex: 1; width: 100%; min-width: 0; border-radius: 6px 0 0 6px; padding-right: 56px; }
+.qf-box .icon-btn { position: absolute; top: 50%; transform: translateY(-50%); width: 24px; height: 24px; }
+.qf-clear { right: 2px; }
+.qf-send { right: 26px; color: var(--accent); }
+.qf-clear[hidden] + .qf-send { right: 2px; }
+@media (max-width: 600px) { .qf { flex-basis: 100%; } .qf-side span { display: none; } }
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 8px 0; }
+.toolbar .lab { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.card-box { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; min-width: 0; }
+.grid-cards { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); }
+.stat { display: flex; flex-direction: column; gap: 2px; }
+.stat .n { font: 600 24px/1.1 var(--font-head); font-variant-numeric: tabular-nums; }
+.stat .l { color: var(--muted); font-size: 12px; }
+table.data { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.data th { text-align: left; font-weight: 600; color: var(--muted); font-size: 12px; padding: 6px 8px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--panel); }
+table.data td { padding: 6px 8px; border-bottom: 1px solid var(--soft); vertical-align: top; }
+table.data tr:hover td { background: var(--hover); }
+table.data td.num, table.data th.num { text-align: right; font-variant-numeric: tabular-nums; }
+/* narrow: the tabs are icons, but the open page keeps its name */
+@media (max-width: 900px) { .tab:not(.active) span { display: none; } .team-btn .tp { display: none; } }
+@media (max-width: 600px) {
+  .view { padding: 10px; }
+  .topbar { gap: 4px; padding: 0 4px; }
+  .tab { padding: 0 7px; }
+  .tab-more .tm-word { display: none; }
+  .team-btn { width: 96px; padding: 4px 6px; margin-right: 2px; }
+  .team-btn > svg { display: none; }
+  .top-tools .icon-btn { width: 28px; }
+}
+
+/* a greyed-out top button looks greyed out, the Excel mark too */
+.top-btn:disabled svg, .top-btn[aria-disabled="true"] svg { filter: grayscale(1); opacity: .5; }
+/* a label stays with its buttons when the line wraps */
+.lab-group { display: inline-flex; align-items: center; gap: 8px; }
+/* a plain table sorted by clicking its column titles (ui/sortable.ts) */
+table.data th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+table.data th.sortable:hover { color: var(--ink); }
+table.data th.sortable[aria-sort="ascending"], table.data th.sortable[aria-sort="descending"] { color: var(--accent); }
+table.data th.sortable[aria-sort="ascending"]::after { content: " ▲"; font-size: 9px; }
+table.data th.sortable[aria-sort="descending"]::after { content: " ▼"; font-size: 9px; }
+/* a pinned search (Enter on the Board): only matches show until the text is cleared */
+.qf.pinned .qf-input { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--panel)); }
+.qf.pinned .qf-clear { color: var(--accent); }
+/* column widths set by dragging (ui/resizable.ts) */
+.col-grip { position: absolute; top: 0; right: -3px; bottom: 0; width: 7px; cursor: col-resize; z-index: 3; touch-action: none; }
+.col-grip::after { content: ""; position: absolute; top: 20%; bottom: 20%; left: 3px; width: 1px; background: var(--line); }
+.col-grip:hover::after, .col-grip.on::after { top: 0; bottom: 0; width: 2px; left: 2px; background: var(--accent); }
+table.cols-sized td, table.cols-sized th { overflow: hidden; text-overflow: ellipsis; }
+table.data th:last-child .col-grip, .tree-table th:last-child .col-grip { right: 0; }
+/* groups: each group of choices (the sprint, hidden columns…) reads as one */
+.pb-group { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 10px; background: color-mix(in srgb, var(--soft) 55%, transparent); min-height: 34px; }
+.pb-group .people { gap: 4px; }
+/* the Filter button stands a bit larger in its own group */
+.pb-group .fbar-add { font-size: 13px; padding: 5px 12px; gap: 6px; }
+.pb-group .fbar-add .icon { width: 15px; height: 15px; }
+/* "Skip to content": the first stop of Tab, shown only while focused */
+.skip-link { position: fixed; left: 8px; top: 6px; z-index: 300; transform: translateY(-160%); background: var(--panel); color: var(--ink); border: 2px solid var(--accent);
+  border-radius: 6px; padding: 6px 12px; font: inherit; font-size: 13px; cursor: pointer; }
+.skip-link:focus { transform: none; }
+.view-host:focus { outline: none; }
+/* the Settings gear shows unsaved settings with a dot */
+.top-set { position: relative; }
+.top-dot { position: absolute; top: 5px; right: 5px; width: 8px; height: 8px; border-radius: 50%; background: var(--warn); box-shadow: 0 0 0 2px var(--menu); }
+
+/* the tiny cross of every tab and block of the bars (src/ui/blocks.ts): it appears on hover; a click on it hides the block */
+[data-blk], .tab { position: relative; }
+body:not(.no-xs) [data-blk]::after { content: "×"; position: absolute; top: -6px; right: -5px; width: 12px; height: 12px; display: grid; place-items: center; font: 600 11px/1 var(--font); color: var(--muted); opacity: 0; transition: opacity .12s; border-radius: 50%; z-index: 2; }
+body:not(.no-xs) .tab:not(.active)::after { content: "×"; position: absolute; top: 3px; right: 3px; width: 12px; height: 12px; display: grid; place-items: center; font: 600 11px/1 var(--font); color: var(--menu-muted); opacity: 0; transition: opacity .12s; }
+body:not(.no-xs) .topbar [data-blk]::after { color: var(--menu-muted); }
+/* the cross shows only while the pointer is on its control (or tab) */
+body:not(.no-xs) [data-blk]:hover::after, body:not(.no-xs) .tab:hover::after { opacity: .85; }
+
+/* the page bar's order: People first, then Filter, then the Board's layout switch; the rest follows. What is last goes under ⋯ first. */
+.pb-2 [data-blk="people"], .pb-2 .pb-group:has(> [data-blk="people"]) { order: -4; }
+.pb-2 [data-blk="filters"], .pb-2 .pb-group:has(> [data-blk="filters"]) { order: -3; }
+.pb-2 [data-blk="layout"] { order: -2; }
+/* the first line: team, then style, then the menu titles */
+.top-lead { display: flex; align-items: center; gap: 6px; flex: none; }
+.top-lead .team-btn { margin-right: 0; }
+.top-lead .style-btn { background: rgb(255 255 255 / .08); color: var(--menu-ink); border: 1px solid rgb(255 255 255 / .16); font-size: 12.5px; }
+.top-lead .style-btn:hover { background: rgb(255 255 255 / .16); }
+.top-lead .style-btn .muted { display: none; }
+
+/* both lines stand out: the top bar is brighter and casts a shadow; the page bar is a surface of its own */
+.topbar { box-shadow: 0 1px 0 rgb(0 0 0 / .3), 0 3px 10px rgb(0 0 0 / .2); }
+.tab { color: color-mix(in srgb, var(--menu-ink) 82%, var(--menu)); font-weight: 500; }
+.tab.active { font-weight: 700; border-bottom-width: 3px; }
+.page-bar { padding: 8px 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 1px 3px rgb(0 0 0 / .08); }
+.topbar .top-warn.off { opacity: .55; } .topbar .top-warn.off svg { filter: grayscale(1); } .topbar .top-warn:not(.off) { color: var(--warn); }

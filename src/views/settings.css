@@ -1,0 +1,105 @@
+/* Settings: tabs, cards of fields, Save and Discard. */
+.v-settings { max-width: 920px; }
+.v-settings .set-tabs { display: flex; flex-wrap: wrap; gap: 0 2px; border-bottom: 1px solid var(--line); margin-bottom: 14px; }
+.v-settings .set-tab { display: inline-flex; align-items: center; gap: 6px; font: inherit; font-size: 13.5px; color: var(--muted); background: none; border: 0;
+  border-bottom: 2px solid transparent; padding: 8px 12px; cursor: pointer; white-space: nowrap; }
+.v-settings .set-tab:hover { color: var(--ink); background: var(--hover); }
+.v-settings .set-tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+.v-settings .set-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); }
+.v-settings .set-intro { margin: 0 0 6px; max-width: 80ch; }
+.v-settings .set-scope { display: flex; align-items: center; gap: 6px; margin: 0 0 12px; font-size: 12.5px; color: var(--muted); }
+:is(.v-settings, .col-rules) .set-list { display: flex; flex-direction: column; gap: 10px; }
+:is(.v-settings, .col-rules) .set-card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+:is(.v-settings, .col-rules) .set-card h3 { margin: 0; }
+:is(.v-settings, .col-rules) .set-card p { margin: 0; }
+:is(.v-settings, .col-rules) .set-card-head { display: flex; align-items: center; gap: 8px; }
+:is(.v-settings, .col-rules) .set-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 10px; }
+:is(.v-settings, .col-rules) .set-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+:is(.v-settings, .col-rules) .set-field > span:first-child { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+:is(.v-settings, .col-rules) .set-field .input { width: 100%; }
+:is(.v-settings, .col-rules) .set-field .segmented { align-self: flex-start; }
+:is(.v-settings, .col-rules) .set-num { max-width: 120px; }
+:is(.v-settings, .col-rules) .set-checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 4px 12px; }
+:is(.v-settings, .col-rules) .set-check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; }
+:is(.v-settings, .col-rules) .set-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+:is(.v-settings, .col-rules) .set-person { cursor: default; padding-left: 3px; }
+:is(.v-settings, .col-rules) .set-person .icon-btn.small { width: 18px; height: 18px; }
+:is(.v-settings, .col-rules) .set-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.v-settings a.btn { text-decoration: none; }
+:is(.v-settings, .col-rules) .set-empty { margin: 4px 0; }
+.v-settings .set-foot { position: sticky; bottom: 0; display: flex; align-items: center; gap: 10px; padding: 10px 0; margin-top: 12px;
+  background: var(--bg); border-top: 1px solid var(--line); z-index: 2; }
+.v-settings .set-keyinfo { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.v-settings .set-test { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.v-settings .set-ai-result:empty { display: none; }
+.v-settings .set-ai-result { font-size: 13px; }
+.v-settings .set-rows { display: flex; flex-direction: column; gap: 6px; }
+.v-settings .set-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.v-settings .set-row > .input:first-child { flex: 1; min-width: 0; }
+.v-settings .set-row select.input { width: auto; max-width: 160px; }
+.v-settings .set-tpl-activity { width: 150px; }
+.v-settings .set-tpl-hours { width: 80px; }
+.v-settings .set-row-tools { display: flex; gap: 2px; flex: none; }
+.settings-palette { display: grid; grid-template-columns: repeat(4, 26px); gap: 8px; padding: 4px; }
+.settings-palette .set-swatch[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--ink); }
+@media (max-width: 600px) {
+  .v-settings .set-tpl { flex-wrap: wrap; }
+  .v-settings .set-tpl .set-tpl-title { flex-basis: 100%; }
+}
+.v-settings .set-display { margin-bottom: 14px; }
+/* which parts apply at once and which need Save */
+.v-settings .set-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px;
+  background: color-mix(in srgb, var(--ok) 16%, var(--panel)); color: var(--ink); border: 1px solid color-mix(in srgb, var(--ok) 45%, var(--line)); white-space: nowrap; }
+.v-settings .set-badge.save { background: var(--warn-soft); border-color: color-mix(in srgb, var(--warn) 50%, var(--line)); }
+.v-settings .set-sub { margin: 0 0 4px; }
+.v-settings .set-sub h3 { margin: 0; font-size: 14px; }
+.v-settings .set-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.v-settings .btn[aria-disabled="true"] { opacity: .55; cursor: default; }
+.v-settings .btn.primary[aria-disabled="true"]:hover { background: var(--accent); }
+/* a field a check found wrong (also in the column rules dialog) */
+.invalid { outline: 2px solid var(--bad) !important; outline-offset: 1px; border-radius: 6px; }
+.set-err { display: flex; align-items: center; gap: 5px; margin: 2px 0 0; color: var(--bad); font-size: 12px; }
+.set-err .icon { flex: none; }
+.v-settings .set-sub-h { margin: 12px 0 4px; font-size: 12px; font-weight: 600; color: var(--muted); }
+
+/* the compact checkboxes of the "what shows" cards: a small box with its name, grouped under a label */
+.v-settings .set-group { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.v-settings .set-group-name { flex: none; width: 74px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.v-settings .set-picks, .v-settings .set-menu { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 6px; flex: 1; min-width: 0; }
+.v-settings .set-pick { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px 3px 7px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel-2, var(--panel)); color: var(--muted); font-size: 12.5px; cursor: pointer; white-space: nowrap; }
+.v-settings .set-pick:hover { border-color: var(--faint); color: var(--ink); }
+.v-settings .set-pick:has(input:checked) { color: var(--ink); border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); background: color-mix(in srgb, var(--accent) 8%, var(--panel)); }
+.v-settings .set-pick input { margin: 0; width: 13px; height: 13px; accent-color: var(--accent); }
+.v-settings .set-pick .icon { flex: none; }
+.v-settings .set-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex: none; }
+/* the menu titles, drawn like the top bar */
+.v-settings .set-menu { padding: 6px 8px; border-radius: 8px; background: var(--menu); gap: 2px 4px; }
+.v-settings .set-menu .set-pick { background: none; border-color: transparent; color: var(--menu-muted); border-radius: 6px; padding: 5px 8px 5px 6px; font-size: 13px; }
+.v-settings .set-menu .set-pick:hover { background: rgb(255 255 255 / .08); color: var(--menu-ink); border-color: transparent; }
+.v-settings .set-menu .set-pick:has(input:checked) { color: var(--menu-ink); background: none; border-color: transparent; }
+.v-settings .set-menu .set-pick:not(:has(input:checked)) { opacity: .55; text-decoration: line-through; }
+
+/* a setting with its icon, its name and what it does */
+.v-settings .set-opts { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 290px), 1fr)); gap: 8px; }
+.v-settings .set-opt { display: grid; grid-template-columns: auto 30px minmax(0, 1fr); align-items: start; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2, var(--panel)); cursor: pointer; }
+.v-settings .set-opt:hover { border-color: var(--faint); }
+.v-settings .set-opt:has(input:checked) { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); background: color-mix(in srgb, var(--accent) 6%, var(--panel)); }
+.v-settings .set-opt:not(:has(input:checked)) .set-opt-text b { color: var(--muted); }
+.v-settings .set-opt > input { margin: 4px 0 0; width: 15px; height: 15px; accent-color: var(--accent); }
+.v-settings .set-opt-icon { display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); }
+.v-settings .set-opt-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.v-settings .set-opt-text b { font-size: 13px; font-weight: 600; }
+.v-settings .set-badge.personal { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
+.v-settings .set-tab .icon { flex: none; opacity: .8; }
+/* the team's members */
+.v-settings .set-members { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr)); gap: 4px 12px; }
+.v-settings .set-member { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 6px; cursor: pointer; }
+.v-settings .set-member:hover { background: var(--hover); }
+.v-settings .set-member.off { opacity: .55; }
+.v-settings .set-member.off .set-member-name b { text-decoration: line-through; }
+.v-settings .set-member-name { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+.v-settings .set-member-name .small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v-settings .set-opt.set-weight { grid-template-columns: 30px minmax(0, 1fr) auto; }
+.v-settings .set-weight-box { display: inline-flex; align-items: center; gap: 6px; }
+.v-settings .set-weight-box .set-num { width: 72px; max-width: 72px; }
+.v-settings .set-weight-box { min-width: 150px; justify-content: flex-end; }

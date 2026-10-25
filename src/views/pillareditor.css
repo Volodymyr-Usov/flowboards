@@ -1,0 +1,21 @@
+/* Strategy pillar editor: in Settings → Strategy and in the "Edit pillars" dialog of the Strategy page. */
+.pe-list { display: flex; flex-direction: column; gap: 10px; }
+.pe-card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.pe-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.pe-field > span:first-child { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.pe-prefix { max-width: 220px; }
+.pe-pillar { flex-direction: row; align-items: flex-start; gap: 12px; }
+.pe-fields { flex: 1; display: grid; grid-template-columns: minmax(120px, 1fr) minmax(160px, 2fr); gap: 8px; min-width: 0; }
+.pe-fields .input { width: 100%; }
+.pe-tools { display: flex; gap: 2px; }
+.pe-swatch { width: 26px; height: 26px; border-radius: 6px; border: 2px solid var(--panel); box-shadow: 0 0 0 1px var(--line); cursor: pointer; flex: none; padding: 0; }
+.pe-palette { display: grid; grid-template-columns: repeat(4, 26px); gap: 8px; padding: 4px; }
+.pe-palette .pe-swatch[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--ink); }
+.pe-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.pe-empty { margin: 4px 0; }
+.pe-dialog { display: flex; flex-direction: column; gap: 10px; }
+.pe-note { margin: 0; }
+@media (max-width: 600px) {
+  .pe-pillar { flex-wrap: wrap; }
+  .pe-fields { grid-template-columns: 1fr; flex-basis: 100%; order: 3; }
+}

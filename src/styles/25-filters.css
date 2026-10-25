@@ -1,0 +1,30 @@
+/* Filters shared by every page: person chips, filter chips with their editors (src/ui/filterbar.ts). */
+
+/* person chips */
+.people { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.pchip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 999px; padding: 1px 8px 1px 1px; cursor: pointer; font: inherit; font-size: 12px; }
+.pchip.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+.pchip.off { opacity: .4; }
+.pchip.pmore { gap: 2px; font-size: 12px; padding: 0 8px; min-height: 26px; }
+.pmore-pop { max-width: 340px; display: flex; flex-direction: column; gap: 6px; padding: 4px; }
+.people .pclear { white-space: nowrap; }
+
+/* filters on any property */
+.fbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.fbar-add { white-space: nowrap; }
+.tf-chip { display: inline-flex; align-items: center; gap: 2px; padding: 0 2px 0 0; }
+.tf-chip.on { border-color: var(--accent); }
+.tf-chip .icon-btn { color: var(--ink); opacity: .75; }
+.tf-chip .icon-btn:hover { opacity: 1; }
+.tf-chip:not(.on) { opacity: .7; }
+.tf-edit { border: 0; background: none; color: inherit; font: inherit; font-size: 12px; padding: 2px 4px 2px 8px; cursor: pointer; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tf-body { display: flex; flex-direction: column; gap: 8px; padding: 6px; width: 300px; max-width: calc(100vw - 32px); }
+.tf-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tf-row .input { flex: 1; min-width: 0; }
+.tf-values { display: flex; flex-direction: column; gap: 2px; max-height: 280px; overflow: auto; }
+.tf-value { display: flex; align-items: center; gap: 8px; padding: 3px 4px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+.tf-value:hover { background: var(--hover); }
+.tf-value span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* a count of what the filters leave, next to them */
+.filter-count { white-space: nowrap; }

@@ -1,0 +1,17 @@
+{
+  "name": "flowboards",
+  "version": "1.2.0",
+  "private": true,
+  "description": "A free Azure DevOps extension: story map, tree, roadmap, dependencies, calendar, story scheduler, sprint planning, flow metrics, pull requests, health checks and audits.",
+  "license": "MIT",
+  "type": "module",
+  "engines": { "node": ">=22.18" },
+  "scripts": {
+    "build": "node tools/build.mjs",
+    "dev": "node tools/dev.mjs",
+    "test": "node --test --disable-warning=ExperimentalWarning \"test/**/*.test.ts\"",
+    "package": "node tools/package.mjs",
+    "qa:demo": "node tools/qa-demo.mjs",
+    "typecheck": "npx --yes -p typescript@5.9.3 tsc --noEmit -p ."
+  }
+}

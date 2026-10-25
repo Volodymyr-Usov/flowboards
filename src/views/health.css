@@ -1,0 +1,50 @@
+/* Health: score, check chips, findings grouped by check or by item. */
+.v-health .hl-top { display: flex; flex-wrap: wrap; gap: 12px; align-items: stretch; margin-bottom: 12px; }
+.v-health .hl-score { display: flex; flex-direction: column; gap: 6px; min-width: 220px; flex: 0 1 280px; }
+.v-health .hl-bar { height: 6px; border-radius: 3px; background: var(--bad-soft); overflow: hidden; }
+.v-health .hl-bar i { display: block; height: 100%; background: var(--ok); border-radius: 3px; }
+.v-health .hl-chips { display: flex; flex-wrap: wrap; gap: 6px; align-content: flex-start; flex: 1 1 400px; }
+.v-health .hl-chips .chip b { font-variant-numeric: tabular-nums; }
+.v-health .hl-chips .chip.zero { opacity: .5; }
+.hl-sev { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--faint); }
+.hl-sev.high { background: var(--bad); }
+.hl-sev.medium { background: var(--warn); }
+.hl-sev.low { background: var(--accent); }
+.v-health .chip[aria-pressed="true"] .hl-sev { outline: 1.5px solid var(--accent-ink); }
+.v-health .hl-groups { display: flex; flex-direction: column; gap: 12px; }
+.v-health .hl-group { padding: 8px 12px; }
+.v-health .hl-group.sel { outline: 2px solid var(--accent); }
+.v-health .hl-ghead { display: flex; align-items: center; gap: 8px; padding: 2px 0 6px; border-bottom: 1px solid var(--soft); min-width: 0; }
+.v-health .hl-ghead .item-link { overflow: hidden; white-space: nowrap; }
+.v-health .hl-ghead .item-link .t { overflow: hidden; text-overflow: ellipsis; }
+.v-health .hl-row { display: flex; align-items: center; gap: 8px; padding: 5px 2px; border-bottom: 1px solid var(--soft); min-width: 0; }
+.v-health .hl-row:last-child { border-bottom: 0; }
+.v-health .hl-row:hover { background: var(--hover); }
+.v-health .hl-row.sel { background: var(--accent-soft); }
+.v-health .hl-row.hidden-f { opacity: .5; }
+.v-health .hl-item { flex: 0 1 45%; min-width: 0; overflow: hidden; white-space: nowrap; }
+.v-health .hl-item .item-link { max-width: 100%; }
+.v-health .hl-item .t { overflow: hidden; text-overflow: ellipsis; }
+.v-health .hl-msg { flex: 1 1 auto; min-width: 0; font-size: 13px; color: var(--muted); }
+.v-health .hl-msg b { color: var(--ink); font-weight: 600; }
+.v-health .hl-acts { display: flex; align-items: center; gap: 4px; flex: none; margin-left: auto; }
+.v-health .hl-more { margin-top: 6px; }
+@media (max-width: 700px) {
+  .v-health .hl-row { flex-wrap: wrap; }
+  .v-health .hl-item { flex-basis: 100%; }
+}
+
+/* adding or changing a check, and the list of checks */
+.hl-edit { display: flex; flex-direction: column; gap: 12px; min-width: min(640px, 80vw); }
+.hl-field { display: flex; flex-direction: column; gap: 5px; }
+.hl-field > span:first-child { font-size: 12px; font-weight: 600; color: var(--muted); }
+.hl-act, .hl-act-opts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.hl-manage { display: flex; flex-direction: column; gap: 6px; min-width: min(560px, 80vw); }
+.hl-manage h3 { margin: 8px 0 2px; font-size: 13px; }
+.hl-mrow { display: flex; align-items: center; gap: 8px; }
+.hl-mrow .spacer, .hl-ghead .spacer { flex: 1; }
+/* "Hide": an eye with a line, not a × that reads as delete */
+.v-health .hl-hide { gap: 4px; padding: 2px 7px; color: var(--muted); }
+.v-health .hl-hide:hover:not(:disabled) { color: var(--ink); }
+.hl-mlist { display: flex; flex-direction: column; gap: 6px; }
+.hl-more { display: flex; align-items: center; gap: 12px; padding: 8px 2px 2px; }
