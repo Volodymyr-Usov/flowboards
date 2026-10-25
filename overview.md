@@ -1,5 +1,7 @@
 # Flowboards
 
+**A complete re-imagining of the Azure DevOps UI experience, taken to the next level. Once tried, never go back.**
+
 One page under **Boards** that shows a team's work in many ways and lets you change it in place.
 Free and open source: <https://github.com/Volodymyr-Usov/flowboards>. Made by Volodymyr Usov: [usovvova.com](https://usovvova.com).
 
