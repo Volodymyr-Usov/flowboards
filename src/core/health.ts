@@ -263,21 +263,27 @@ export function tagsAlike(a: string, b: string): boolean {
   return x.length >= 5 && y.length >= 5 && editDistanceUpTo1(x, y) <= 1;
 }
 
-/** Groups (2 or more) of tag names that look alike, each sorted by name. */
-export function duplicateTagGroups(names: string[]): string[][] {
-  const parent = names.map((_, i) => i);
-  const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
-  const keys = names.map(tagKey);
-  for (let i = 0; i < names.length; i++) {
-    for (let j = i + 1; j < names.length; j++) {
-      if (Math.abs(keys[i].length - keys[j].length) > 3) continue;
-      if (tagsAlike(names[i], names[j])) parent[find(i)] = find(j);
+/**
+ * Groups (2 or more) of tag names that look alike, each sorted by name. A group is a tag (the most used
+ * first, by `uses`) and the tags that each look like that one: no chains, so "abcde" ~ "abcdf" ~ "abcgf"
+ * does not put "abcde" and "abcgf" together.
+ */
+export function duplicateTagGroups(names: string[], uses: (name: string) => number = () => 0): string[][] {
+  const order = names.map((n, i) => ({ n, i, u: uses(n), k: tagKey(n) }))
+    .sort((a, b) => b.u - a.u || a.n.localeCompare(b.n) || a.i - b.i);
+  const taken = new Set<number>();
+  const groups: string[][] = [];
+  for (const lead of order) {
+    if (taken.has(lead.i)) continue;
+    taken.add(lead.i);
+    const g = [lead.n];
+    for (const o of order) {
+      if (taken.has(o.i) || Math.abs(lead.k.length - o.k.length) > 3) continue;
+      if (tagsAlike(lead.n, o.n)) { taken.add(o.i); g.push(o.n); }
     }
+    if (g.length > 1) groups.push(g);
   }
-  const groups = new Map<number, string[]>();
-  names.forEach((n, i) => { const r = find(i); groups.set(r, [...(groups.get(r) ?? []), n]); });
-  return [...groups.values()].filter((g) => g.length > 1).map((g) => g.sort((a, b) => a.localeCompare(b)))
-    .sort((a, b) => a[0].localeCompare(b[0]));
+  return groups.map((g) => g.sort((a, b) => a.localeCompare(b))).sort((a, b) => a[0].localeCompare(b[0]));
 }
 
 /** Replace one tag with another in a tag list (case-insensitive), without making a double. */

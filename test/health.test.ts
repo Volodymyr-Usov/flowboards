@@ -152,6 +152,13 @@ test("tag look-alikes", () => {
     [["Perfomance", "Performance"], ["security", "Security"]]);
 });
 
+test("tag look-alike groups do not chain: each tag is like the group's most used tag", () => {
+  // abcde ~ abcdf ~ abcgf, but abcde and abcgf are two letters apart
+  assert.deepEqual(duplicateTagGroups(["abcde", "abcdf", "abcgf"]), [["abcde", "abcdf"]]);
+  // the most used tag leads: abcdf takes both of its look-alikes
+  assert.deepEqual(duplicateTagGroups(["abcde", "abcdf", "abcgf"], (n) => (n === "abcdf" ? 9 : 1)), [["abcde", "abcdf", "abcgf"]]);
+});
+
 test("replace a tag without doubles", () => {
   assert.deepEqual(replaceTag(["a", "Perf", "b"], "perf", "Performance"), ["a", "b", "Performance"]);
   assert.deepEqual(replaceTag(["Performance", "Perf"], "Perf", "performance"), ["Performance"]);
