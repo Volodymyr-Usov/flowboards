@@ -10,7 +10,7 @@ import { h, icon, svg } from "../ui/dom.ts";
 import { errorText, help, spinner } from "../ui/kit.ts";
 import { loadBurndown, MAX_TASKS } from "./sprintdata.ts";
 import type { BurndownPoint } from "./burndown.ts";
-import { dayKey, todayDay } from "./timeaxis.ts";
+import { dayKey, planDay, todayDay } from "./timeaxis.ts";
 
 const fmtNum = (n: number): string => (Math.round(n * 10) / 10).toLocaleString();
 const UTC_DATE: Intl.DateTimeFormatOptions = { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" };
@@ -71,7 +71,7 @@ export function burndownPanel(app: App, opts: { heading?: "h2" | "h3"; foldKey?:
   async function fill(it: Iteration, body: HTMLElement, mine: () => boolean, task: ReturnType<typeof ws.taskLevel>, remainingField: string): Promise<void> {
     if (!task) { body.append(h("p.muted", null, "This process has no task level, so there is no remaining work to burn down.")); return; }
     if (!it.start || !it.finish) { body.append(h("p.muted", null, "This sprint has no dates.")); return; }
-    if (Date.parse(it.start) > Date.now()) { body.append(h("p.muted", null, `The burndown starts with the sprint on ${fmtDate(it.start, UTC_DATE)}.`)); return; }
+    if ((planDay(it.start) ?? 0) > todayDay()) { body.append(h("p.muted", null, `The burndown starts with the sprint on ${fmtDate(it.start, UTC_DATE)}.`)); return; }
     const progress = spinner("Reading the sprint's tasks…");
     body.append(progress);
     try {

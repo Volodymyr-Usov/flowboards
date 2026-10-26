@@ -10,6 +10,7 @@ import { h } from "../ui/dom.ts";
 import { sortable } from "../ui/sortable.ts";
 import { dialog, errorText, spinner, stateMark, toast } from "../ui/kit.ts";
 import { sheetButtons } from "../ui/tableexport.ts";
+import { sprintQuery } from "./sprintdata.ts";
 import type { Cell } from "../ui/xlsx.ts";
 
 export interface Goal { id: string; text: string; by: string; at: string }
@@ -40,7 +41,8 @@ export async function openSprintReport(app: App, sprint: Iteration): Promise<voi
 
   try {
     const removed = statesOf(ws.process, req.types, ["Removed"]);
-    const ids = await app.api.query(ws.project, { types: req.types, iterationUnder: sprint.path, notStates: removed.length ? removed : undefined });
+    // only the team's own areas: other teams may share the sprint
+    const ids = await app.api.query(ws.project, { ...sprintQuery(ws, req.types, sprint.path), notStates: removed.length ? removed : undefined });
     const items = (await app.api.items(ws.project, ids)).filter((w) => !isRemoved(w)).sort((a, b) => Number(isDone(b)) - Number(isDone(a)) || (a.order ?? 0) - (b.order ?? 0));
     const done = items.filter(isDone);
     const open = items.filter((w) => !isDone(w));

@@ -45,6 +45,7 @@
 .v-sprint .sp-row.done .sp-title, .v-sprint .sp-task.done .sp-title { color: var(--muted); }
 .v-sprint .sp-row.dragged { opacity: .45; }
 .v-sprint .sp-grip { color: var(--faint); width: 14px; flex: none; cursor: grab; display: inline-grid; place-items: center; }
+.v-sprint .sp-row[data-drag] .sp-grip { touch-action: none; } /* a touch on the grip drags the row; elsewhere it scrolls the list */
 .v-sprint .sp-id { flex: none; font-size: 12px; }
 .v-sprint .sp-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .v-sprint .sp-eff { flex: none; min-width: 3ch; text-align: right; color: var(--muted); font-size: 12px; }

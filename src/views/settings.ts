@@ -23,7 +23,7 @@ import { keepFocus } from "../ui/focuskeep.ts";
 import { avatar, busy, confirm, errorText, help, personPicker, segmented, select, toast, typeMark } from "../ui/kit.ts";
 import type { PrShow } from "./boardmodel.ts";
 import { boardColumns } from "./boardmodel.ts";
-import { columnHidden, columnShownPatch, readBoardOpts, saveBoardOpts } from "./boardprefs.ts";
+import { boardScope, columnHidden, columnShownPatch, readBoardOpts, saveBoardOpts } from "./boardprefs.ts";
 import { pageBar } from "../ui/pagebar.ts";
 import type { PillarDraft } from "./pillareditor.ts";
 import { checkPillars, pillarDraft, pillarEditor, savePillars } from "./pillareditor.ts";
@@ -550,13 +550,13 @@ export const settingsView: View = {
       return h("div", null,
         h("p.set-intro", null, "Choose which columns the Board shows. The columns come from the team's board (or from the states, see Project board); a hidden column keeps its cards, they just are not drawn. On the Board, the eye on a column title hides it and a grey arrow next to it brings it back; this list does the same."),
         h("div.set-list", null, live(() => {
-          const o = readBoardOpts();
+          const o = readBoardOpts(boardScope(ws));
           const cols = boardColumns(ws.process, req, ws.board, app.settings.shared.boardMode === "states" || !ws.board?.columnField ? "states" : "columns");
           const box = h("div");
           const kindText = (k: string): string => (k === "incoming" ? "The column new work lands in. Hidden by default: it is the backlog's front door." : k === "outgoing" ? "The column of finished work. Hidden by default; what was closed lately shows here." : "A working column.");
           box.append(card("Board columns", "Each column with its colour. Tick the ones you want to see.", h("div.set-opts", null, cols.map((c) => opt({
             label: c.name, desc: kindText(c.kind), on: !columnHidden(o, c), fk: `disp:${c.name}`,
-            lead: h("i.set-dot", { style: { background: c.color } }), set: (v) => { saveBoardOpts(columnShownPatch(readBoardOpts(), c, v)); },
+            lead: h("i.set-dot", { style: { background: c.color } }), set: (v) => { saveBoardOpts(columnShownPatch(readBoardOpts(boardScope(ws)), c, v), boardScope(ws)); },
           })))));
           return box;
         }) as HTMLElement),

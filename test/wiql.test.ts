@@ -35,3 +35,9 @@ test("time precision only for dates with a time", () => {
   assert.equal(needsTimePrecision({ changedAfter: "2026-01-01" }), false);
   assert.equal(needsTimePrecision({ changedAfter: "2026-01-01T10:00:00Z" }), true);
 });
+
+test("asOf asks for the items that matched at that moment", () => {
+  const q = toWiql({ types: ["Task"], iterationUnder: "P\\Sprint 1", asOf: "2026-03-03T23:59:59.999Z" }, "P");
+  assert.match(q, /ORDER BY \[System\.Id\] ASC ASOF '2026-03-03T23:59:59\.999Z'$/);
+  assert.doesNotMatch(toWiql({ types: ["Task"] }, "P"), /ASOF/);
+});

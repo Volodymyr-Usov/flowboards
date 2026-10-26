@@ -15,11 +15,25 @@ function value(row: HTMLTableRowElement, col: number): string {
 
 // "12 Oct 2026", "Oct 12", "2026-10-12": sorted by the day, not by the letters
 const DATE = /^(\d{4}-\d{2}-\d{2}.*|\d{1,2} [A-Za-z]{3,9}( \d{4})?|[A-Za-z]{3,9} \d{1,2}(, \d{4})?)$/;
+const HAS_YEAR = /\d{4}/;
 
-function compare(a: string, b: string): number {
+/**
+ * The moment of a shown date. A date without a year ("28 Dec", "3 Jan") is taken in the year that puts
+ * it nearest to `now`, so a list across New Year sorts right. A cell with data-sort (an ISO date) is
+ * exact and never comes here as text.
+ */
+export function dateValue(text: string, now = Date.now()): number {
+  if (HAS_YEAR.test(text)) return Date.parse(text);
+  const y = new Date(now).getFullYear();
+  const at = (year: number): number => Date.parse(/^[A-Za-z]/.test(text) ? `${text}, ${year}` : `${text} ${year}`);
+  const options = [at(y - 1), at(y), at(y + 1)].filter(Number.isFinite);
+  return options.length ? options.reduce((best, t) => (Math.abs(t - now) < Math.abs(best - now) ? t : best)) : NaN;
+}
+
+export function compare(a: string, b: string, now = Date.now()): number {
   if (blank(a) || blank(b)) return Number(blank(a)) - Number(blank(b)); // blanks last; the caller keeps them there
   if (NUM.test(a) && NUM.test(b)) return parseFloat(a.replace(/[\s,]/g, "")) - parseFloat(b.replace(/[\s,]/g, ""));
-  if (DATE.test(a) && DATE.test(b)) { const x = Date.parse(a); const y = Date.parse(b); if (Number.isFinite(x) && Number.isFinite(y)) return x - y; }
+  if (DATE.test(a) && DATE.test(b)) { const x = dateValue(a, now); const y = dateValue(b, now); if (Number.isFinite(x) && Number.isFinite(y)) return x - y; }
   return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
 }
 
