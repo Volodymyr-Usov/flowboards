@@ -233,7 +233,7 @@ export function createPanel(app: App): Panel {
       const [p1, p2] = partTitles(item.title);
       return [
         h("button.btn.small.ph-tool", { type: "button", disabled: !can, "aria-label": "Split in half",
-          title: can ? `Split in half: the first ${splitTasks(tasks).first.length} of its ${tasks.length} tasks stay here and the story is renamed “${p1}”; the other ${splitTasks(tasks).second.length} move to a new story “${p2}” that has the same description, owner, sprint, tags, estimate and parent. You are asked first, and Undo is offered afterwards.`
+          title: can ? `Split in half: the first ${splitTasks(tasks).first.length} of its ${tasks.length} tasks stay here and the story is renamed “${p1}”; the other ${splitTasks(tasks).second.length} move to a new story “${p2}” that has the same description, owner, sprint, tags and parent; each part gets half the estimate. You are asked first, and Undo is offered afterwards.`
             : "Split in half needs at least two tasks, so that each part gets some. Add tasks first.",
           onclick: () => void splitStory(app, item) }, icon("split", 13), "Split"),
         h("button.btn.small.ph-tool", { type: "button", "aria-label": "Follow-up",

@@ -32,6 +32,12 @@ function copyFields(app: App, o: WorkItem): Record<string, unknown> {
   return fields;
 }
 
+/** An estimate split in two: the first part keeps the larger half (to one decimal), the second the rest. */
+export function halfEstimate(n: number): [number, number] {
+  const first = Math.ceil((n * 10) / 2) / 10;
+  return [first, Math.round((n - first) * 10) / 10];
+}
+
 /** Undo of a story we made: delete it (it goes to the Recycle Bin); where that is refused, set it to Removed. */
 function undoCreate(app: App, w: Writer, id: number, type: string): () => Promise<unknown> {
   return async () => {
@@ -50,20 +56,24 @@ export async function splitStory(app: App, it: WorkItem): Promise<void> {
   if (!canSplitByHalf(tasks)) return;
   const { first, second } = splitTasks(tasks);
   const [t1, t2] = partTitles(it.title);
+  const ws = app.ws;
+  // the estimate is split too, so the two parts together are not counted twice
+  const effortField = ws.process.fields.effort;
+  const fs = ws.process.types[it.type]?.fields;
+  const halves = it.effort != null && it.effort > 0 && effortField && (!fs || fs.includes(effortField)) ? halfEstimate(it.effort) : null;
   const list = (xs: WorkItem[]): HTMLElement => h("ul", null, xs.map((t) => h("li", null, `#${t.id} ${t.title}`)));
   const ok = await dialog("Split this story in half?", h("div", null,
     h("p", null, h("b", null, it.title)),
-    h("p", null, `It becomes “${t1}” and keeps these ${first.length} tasks:`), list(first),
-    h("p", null, `A new story “${t2}” is made with the same description, owner, sprint, tags, estimate and parent, and gets these ${second.length} tasks:`), list(second),
+    h("p", null, `It becomes “${t1}”${halves ? ` with an estimate of ${halves[0]} (of ${it.effort})` : ""} and keeps these ${first.length} tasks:`), list(first),
+    h("p", null, `A new story “${t2}” is made with the same description, owner, sprint, tags and parent${halves ? `, the rest of the estimate (${halves[1]})` : ""}, and gets these ${second.length} tasks:`), list(second),
     h("p.small.muted", null, "The message afterwards has Undo, which puts everything back and removes the new story.")),
   [{ label: "Cancel", value: "" }, { label: "Split in half", value: "ok", primary: true }]) === "ok";
   if (!ok) return;
-  const ws = app.ws;
   let copyId = 0;
   const steps: { label: string; run: (w: Writer) => Promise<WriteResult> }[] = [{
     label: `Make “${t2}”`,
     run: async (w) => {
-      const item = await w.create(it.type, { ...copyFields(app, it), "System.Title": t2 }, it.parent);
+      const item = await w.create(it.type, { ...copyFields(app, it), "System.Title": t2, ...(halves ? { [effortField]: halves[1] } : {}) }, it.parent);
       copyId = item.id;
       // the copy stands where the original stands (state and board column), where the process allows it
       const same: { field: string; value: unknown }[] = [{ field: "System.State", value: it.state }];
@@ -77,7 +87,10 @@ export async function splitStory(app: App, it: WorkItem): Promise<void> {
   for (const t of second) {
     steps.push({ label: `#${t.id} to part 2`, run: (w) => (copyId ? w.reparent(t.id, copyId) : Promise.reject(new Error("the second part was not made"))) });
   }
-  steps.push({ label: "Rename this story", run: (w) => w.setFields(it.id, [{ field: "System.Title", value: t1 }]) });
+  steps.push({
+    // without the second part this one stays as it is (title and estimate)
+    label: "Rename this story", run: (w) => !copyId ? Promise.reject(new Error("the second part was not made")) : w.setFields(it.id, [{ field: "System.Title", value: t1 }, ...(halves ? [{ field: effortField, value: halves[0] }] : [])]),
+  });
   await app.actions.batch(`“${it.title}” split in half: ${first.length} tasks stay, ${second.length} moved to part 2`, steps);
 }
 
