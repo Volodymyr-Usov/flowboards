@@ -17,6 +17,8 @@ export interface Column {
   limit: number;
   kind: "incoming" | "inProgress" | "outgoing";
   color: string;
+  /** split in Doing and Done on the team's board: the board's done field says which half a card is in */
+  split?: boolean;
 }
 
 /** Columns from the team's board, or one per state of the requirement types. */
@@ -27,6 +29,8 @@ export function boardColumns(p: ProcessInfo, req: Level, board: BoardInfo | null
     return board.columns.map((c) => ({
       name: c.name, states: c.stateMappings, limit: c.itemLimit, kind: c.columnType,
       color: colorOf(Object.values(c.stateMappings)[0]),
+      // a split column needs the field that holds the half; without it the column is drawn whole
+      ...(c.isSplit && board.doneField ? { split: true } : {}),
     }));
   }
   return states.map((s, i) => ({
@@ -417,6 +421,45 @@ export function readAfterUndo<R extends { undo?: () => Promise<unknown> }>(r: R,
   const undo = r.undo;
   if (!undo) return r;
   return { ...r, undo: async () => { const out = await undo(); await read(); return out; } };
+}
+
+/**
+ * Where a card dropped at height `y` goes in a column, as the cards before and after it (0 = none).
+ * While a search lifts matching cards to the top, the screen order is not the backlog order: the
+ * neighbours are taken only among cards of the dragged card's kind (matches with matches, the others
+ * with the others), which keep their backlog order among themselves.
+ */
+export function placeAmong(cards: { id: number; hit: boolean; mid: number }[], hit: boolean, y: number): { before: number; after: number } {
+  let before = 0;
+  for (const c of cards) {
+    if (c.hit !== hit) continue;
+    if (y < c.mid) return { before, after: c.id };
+    before = c.id;
+  }
+  return { before, after: 0 };
+}
+
+export type PriorityMove = "top" | "up" | "down" | "bottom";
+
+/** A card moved by the menu in its column's order (`peers` in backlog order): the cards to go between, or null when it stays. */
+export function priorityMove(peers: number[], id: number, where: PriorityMove): { prev: number; next: number } | null {
+  const i = peers.indexOf(id);
+  if (i < 0) return null;
+  const rest = peers.filter((x) => x !== id);
+  const to = where === "top" ? 0 : where === "up" ? i - 1 : where === "down" ? i + 1 : rest.length;
+  if (to < 0 || to > rest.length || to === i) return null;
+  return { prev: rest[to - 1] ?? 0, next: rest[to] ?? 0 };
+}
+
+/**
+ * Does a drop on this story map row move the story? Into a sprint row: when it is in another row now.
+ * Into the backlog row: when it is not in the team's backlog iteration itself (a story in a sprint the
+ * team does not use shows in the backlog row, and goes to the backlog iteration).
+ */
+export function movesToRow(rows: SprintRow[], row: SprintRow, iteration: string): boolean {
+  if (!row.path) return false;
+  if (row.kind === "backlog") return iteration.toLowerCase() !== row.path.toLowerCase();
+  return rowOf(rows, iteration).key !== row.key;
 }
 
 /** A card dropped between two others (none = start or end): true when its backlog order already puts it there. */

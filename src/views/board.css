@@ -275,3 +275,15 @@ span.c-pts { cursor: default; }
 .card.drop-task { outline: 2px dashed var(--drop); outline-offset: 2px; background: color-mix(in srgb, var(--drop) 12%, var(--card, var(--panel-2))); }
 .mini.moved .m-title { font-weight: 700; }
 .mini.moved { background: color-mix(in srgb, var(--accent) 10%, transparent); border-radius: 4px; }
+
+/* split columns: Doing on top, Done under it */
+.col.split .col-half { min-height: 60px; }
+.col.split .col-half + .col-half { border-top: 1px dashed var(--line); margin-top: 6px; }
+.col-half-head { display: flex; gap: 6px; align-items: baseline; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+.col-body.col-half.drop { background: color-mix(in srgb, var(--drop) 8%, transparent); outline: 2px dashed var(--drop); outline-offset: 2px; border-radius: 8px; }
+/* the "…" on a card: shown when the card is pointed at or focused, always on touch screens */
+.card .c-more { opacity: 0; }
+.card:hover .c-more, .card:focus-within .c-more, .card .c-more:focus-visible { opacity: 1; }
+@media (hover: none) { .card .c-more { opacity: .8; } }
+/* a touch that starts sideways drags a card; one that starts up or down scrolls the page */
+.board:not(.ro) .card, .board:not(.ro):not(.map) .rail .feat:not(.orphan) { touch-action: pan-y; }

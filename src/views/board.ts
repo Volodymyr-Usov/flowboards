@@ -22,13 +22,13 @@ import { debounce, h, icon, rafThrottle, replace, svg } from "../ui/dom.ts";
 import { filterBar, peopleStrip, processFieldNames } from "../ui/filterbar.ts";
 import { askDelete } from "../ui/deleteask.ts";
 import { TASK_DRAG } from "../ui/dragtypes.ts";
-import { avatar, dialog, errorText, menu, personPicker, popup, segmented, select, toast } from "../ui/kit.ts";
+import { avatar, dialog, errorText, itemPicker, menu, personPicker, popup, segmented, select, toast } from "../ui/kit.ts";
 import type { MenuItem } from "../ui/kit.ts";
 import { tagChip } from "../ui/tagchip.ts";
 import { pageBar } from "../ui/pagebar.ts";
 import type { Sheet } from "../ui/xlsx.ts";
 import { openColumnRules } from "./ruleeditor.ts";
-import type { Column, ColorMode, Dir, Group, MissingMode, PrCount, PrLink, RuleGap, SprintRow } from "./boardmodel.ts";
+import type { Column, ColorMode, Dir, Group, MissingMode, PrCount, PrLink, PriorityMove, RuleGap, SprintRow } from "./boardmodel.ts";
 import { defaultLayout } from "../core/workstyle.ts";
 import { sprintChoices, taskboard } from "./taskboard.ts";
 import type { TaskboardInput } from "./taskboard.ts";
@@ -36,7 +36,7 @@ import { burndownPanel } from "./burndownpanel.ts";
 import { boardScope, columnHidden, columnShownPatch, readBoardOpts, writeBoardOpts } from "./boardprefs.ts";
 import { blk } from "../ui/blocks.ts";
 import type { Opts } from "./boardprefs.ts";
-import { DEFAULT_RULES, alreadyBetween, ruleGaps, boardColumns, readAfterUndo, capCards, cardOrder, nearestBox, CELL_CAP, FEATURE_CAP, clockClass, COLUMN_CAP, columnEnteredAt, columnOf, countOf, daysInColumn, featureGroups, groupBy, limitShowing, matches, missing, prCount, prLinks, rowOf, runLimited, sharesState, sprintRows, tint } from "./boardmodel.ts";
+import { DEFAULT_RULES, alreadyBetween, ruleGaps, boardColumns, readAfterUndo, capCards, cardOrder, nearestBox, CELL_CAP, FEATURE_CAP, clockClass, COLUMN_CAP, columnEnteredAt, columnOf, countOf, daysInColumn, featureGroups, groupBy, limitShowing, matches, missing, movesToRow, placeAmong, prCount, prLinks, priorityMove, rowOf, runLimited, sharesState, sprintRows, tint } from "./boardmodel.ts";
 
 interface PrInfo { status: string; title: string; repo: string; url: string }
 /** what arrow keys move between: cards, Features, Epics, taskboard stories and tasks */
@@ -276,7 +276,8 @@ export const boardView: View = {
 
     function draw(): void {
       // a redraw during a drag would replace the dragged card: draw once when the drag ends
-      if (drag || editing || draftBusy()) { drawAfterDrag = true; return; }
+      // also an HTML drag (a task on the taskboard, a task from the details panel): its drop would land on a replaced grid
+      if (drag || htmlDrag || editing || draftBusy()) { drawAfterDrag = true; return; }
       const active = document.activeElement as HTMLElement | null;
       const fEl = active && board.contains(active) ? active.closest<HTMLElement>(ITEMS) : null;
       const focused = Number(fEl?.dataset.id) || null;
@@ -510,6 +511,9 @@ export const boardView: View = {
 
     const shortDate = (iso: string): string => new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short", timeZone: "UTC" });
 
+    /** "Show more" of a column, or of one half of a split column */
+    const colKey = (col: Column, done: boolean): string => `col:${col.name}${col.split ? (done ? ":done" : ":doing") : ""}`;
+
     function column(col: Column, cards: Card[]): HTMLElement {
       // the limit counts every card of the column, also those hidden by person filters
       const total = current.totals.get(col) ?? cards.length;
@@ -536,7 +540,20 @@ export const boardView: View = {
           `${cards.length < total ? `${cards.length} of ` : ""}${total}${col.limit ? `/${col.limit}` : ""}`),
         rules.length ? h("span.c-rule", { title: "This column has rules" }, "§") : null,
         h("div.col-tail", null, eye, peek(current.cols[at + 1], "right")));
-      const key = `col:${col.name}`;
+      if (col.split) {
+        // a split column: Doing on top, Done under it, as the team's board keeps them (its done field)
+        const half = (done: boolean): HTMLElement => {
+          const list = cards.filter((c) => Boolean(c.w.boardDone) === done);
+          const key = colKey(col, done);
+          const { shown: first, hidden } = capCards(list, limitOf(key, COLUMN_CAP));
+          return h("div.col-body.col-half", { dataset: { col: col.name, done: done ? "1" : "0" } },
+            h("div.col-half-head", { title: done ? `Done in ${col.name}: ready to be pulled to the next column. Drop a card here to mark it so.` : `Being worked on in ${col.name}` },
+              done ? "Done" : "Doing", h("span.mono", null, String(list.length))),
+            first.map(card), hidden ? moreButton(key, hidden, COLUMN_CAP) : null);
+        };
+        return h(`div.col.split.k-${col.kind}`, { dataset: { col: col.name } }, head, half(false), half(true));
+      }
+      const key = colKey(col, false);
       const { shown: first, hidden } = capCards(cards, limitOf(key, COLUMN_CAP));
       const body = h("div.col-body", { dataset: { col: col.name } }, first.map(card), hidden ? moreButton(key, hidden, COLUMN_CAP) : null);
       return h(`div.col.k-${col.kind}`, { dataset: { col: col.name } }, head, body);
@@ -572,11 +589,11 @@ export const boardView: View = {
         h("div.c-side", null,
           h("button.owner", { tabindex: -1, dataset: { owner: w.id }, title: w.assignedTo ? `Owner: ${w.assignedTo.displayName}. Click to change.` : "Nobody owns this. Click to pick someone." }, avatar(ws.api, w.assignedTo, 22, { title: "" })),
           // the ⚠ sits left of the +, in the same row, so it never makes the card taller
-          c.missing.length || (!app.actions.readOnly && taskLevel)
-            ? h("div.c-act", null,
-              c.missing.length ? h("span.warn-mark", { title: missTitle(c.missing, c.gaps, c.col.name) }, "⚠") : null,
-              !app.actions.readOnly && taskLevel ? h("button.icon-btn.small.add", { tabindex: -1, title: `New ${taskLevel.defaultType}`, dataset: { add: "task", parent: w.id } }, icon("plus", 12)) : null)
-            : null,
+          h("div.c-act", null,
+            c.missing.length ? h("span.warn-mark", { title: missTitle(c.missing, c.gaps, c.col.name) }, "⚠") : null,
+            !app.actions.readOnly && taskLevel ? h("button.icon-btn.small.add", { tabindex: -1, title: `New ${taskLevel.defaultType}`, dataset: { add: "task", parent: w.id } }, icon("plus", 12)) : null,
+            // the card's menu without right-click: move, order, Feature, owner (also Shift+F10 on the card)
+            h("button.icon-btn.small.c-more", { type: "button", tabindex: -1, dataset: { menu: w.id }, title: "More: move, order, Feature, owner", "aria-label": `Menu of #${w.id}` }, icon("more", 12))),
           h("span.c-gap"),
           h(`span.clock.${clockClass(days, c.col.kind, w.category)}`, { title: `${fmtDays(daysSince(w.created))} since it was created; ${fmtDays(days)} in ${c.col.name}` },
             icon("clock", 12), h("span.life", null, born(daysSince(w.created))), "|", h("b", null, fmtDays(days)))),
@@ -888,6 +905,8 @@ export const boardView: View = {
       if (dragJustEnded) return;
       const t = e.target as HTMLElement;
       if (t.closest(".draft-task")) return; // typing a new task's title: not a click on the card
+      const more = t.closest<HTMLElement>("[data-menu]");
+      if (more) { const item = more.closest<HTMLElement>(ITEMS); if (item) { item.focus({ preventScroll: true }); itemMenu(item, more); } return; }
       const del = t.closest<HTMLElement>("[data-del-task]");
       if (del) { e.preventDefault(); const k = ws.get(Number(del.dataset.delTask)); if (k) void askDelete(app, k); return; }
       const add = t.closest<HTMLElement>("[data-add]");
@@ -1035,9 +1054,22 @@ export const boardView: View = {
       if (el.matches(".card")) {
         const c = current.cards.find((x) => x.w.id === id);
         if (!ro && c && !isMap()) {
-          items.push("-", ...current.cols.filter((col) => col !== c.col).map((col) => ({ label: `Move to ${col.name}`, onClick: () => { back(); void moveCard(w, col, 0, 0); } })));
+          // a split column offers both halves; the card's own half is left out
+          const targets = current.cols.flatMap((col) => (col.split ? [false, true] : [false]).map((done) => ({ col, done })))
+            .filter((x) => x.col !== c.col || (x.col.split && x.done !== Boolean(w.boardDone)));
+          items.push("-", ...targets.map((x) => ({ label: `Move to ${x.col.name}${x.col.split ? (x.done ? " (Done)" : " (Doing)") : ""}`, onClick: () => { back(); void moveCard(w, x.col, 0, 0, x.done); } })));
         }
-        if (!ro && c) items.push({ label: "Move to sprint…", onClick: () => sprintMenu(c, now()) });
+        if (!ro && c) {
+          // the order without dragging: among the cards of its column (or story map cell), in backlog order
+          const peers = orderPeers(c);
+          const order = (label: string, where: PriorityMove): MenuItem => {
+            const spot = priorityMove(peers, id, where);
+            return { label, disabled: !spot, onClick: () => { back(); if (spot) void app.actions.reorder(id, spot.prev, spot.next); } };
+          };
+          items.push("-", order("Move to top", "top"), order("Move up", "up"), order("Move down", "down"), order("Move to bottom", "bottom"));
+        }
+        if (!ro && c) items.push("-", { label: "Move to sprint…", onClick: () => sprintMenu(c, now()) });
+        if (!ro && c && featLevel) items.push({ label: `Change ${featLevel.defaultType}…`, onClick: () => featurePicker(w, now()) });
         if (!ro) items.push("-", { label: "Owner…", onClick: owner });
         const pts = el.querySelector<HTMLElement>("[data-num]");
         if (!ro && pts) items.push({ label: `${pts.dataset.label ?? "Points"}…`, onClick: edit });
@@ -1059,6 +1091,25 @@ export const boardView: View = {
       menu(anchor, items);
     }
 
+    /** The cards a card is ordered among by the menu: its column (story map: its cell), in backlog order. */
+    function orderPeers(c: Card): number[] {
+      const row = isMap() ? rowOf(rows, c.w.iteration).key : "";
+      return current.cards.filter((x) => (isMap() ? x.feature === c.feature && rowOf(rows, x.w.iteration).key === row : x.col === c.col))
+        .map((x) => x.w).sort(byOrder).map((x) => x.id);
+    }
+
+    /** Put a story under another Feature (or under none) without dragging it onto the Feature. */
+    function featurePicker(w: WorkItem, anchor: HTMLElement): void {
+      if (!featLevel) return;
+      const p = ws.get(w.parent);
+      // "No parent": only to take away a Feature parent, never a link to another level
+      const canClear = !!p && featLevel.types.includes(p.type);
+      itemPicker(ws, anchor, (f) => featLevel.types.includes(f.type) && !isDone(f) && f.id !== w.parent, (f) => {
+        anchor.focus({ preventScroll: true });
+        if (f || canClear) void app.actions.reparent(w.id, f ? f.id : 0);
+      }, { placeholder: `Find a ${featLevel.defaultType} by title or number`, allowNone: canClear ? `No parent ${featLevel.defaultType}` : undefined });
+    }
+
     /** The states a story or task can move to, as menu items. */
     function stateItems(w: WorkItem, back: () => void): MenuItem[] {
       return orderedStates(ws.process, [w.type]).filter((s) => s.name !== w.state && s.category !== "Removed")
@@ -1074,9 +1125,8 @@ export const boardView: View = {
     /** Move a card to a sprint without dragging: like a drop on the story map's row (its open tasks go along). */
     function sprintMenu(c: Card, el: HTMLElement): void {
       rows = sprintRows(ws.iterations, backlogPath());
-      const at = rowOf(rows, c.w.iteration).key;
-      const items = rows.filter((r) => r.path && r.key !== at).map((r) => ({
-        label: `${r.name}${r.kind === "current" ? " (now)" : ""}`,
+      const items = rows.filter((r) => movesToRow(rows, r, c.w.iteration)).map((r) => ({
+        label: r.kind === "backlog" ? "Backlog (no sprint)" : `${r.name}${r.kind === "current" ? " (now)" : ""}`,
         onClick: () => { (el.isConnected ? el : itemEl(c.w.id))?.focus({ preventScroll: true }); void dropOnCell(c.w, r.key, c.feature); },
       }));
       menu(el, items.length ? items : [{ label: "No other sprint", disabled: true, onClick: () => {} }]);
@@ -1160,7 +1210,7 @@ export const boardView: View = {
     // ---------- drag and drop ----------
     let drag: null | {
       kind: "card" | "feat"; id: number; src: HTMLElement; ghost: HTMLElement; startX: number; startY: number; dx: number; dy: number;
-      target: null | { type: "col"; col: string; before: number; after: number } | { type: "feat"; id: number } | { type: "epic"; id: number } | { type: "featOrder"; prev: number; next: number }
+      target: null | { type: "col"; col: string; before: number; after: number; done: boolean } | { type: "feat"; id: number } | { type: "epic"; id: number } | { type: "featOrder"; prev: number; next: number }
         | { type: "cell"; row: string; feature: number };
     } = null;
     let pending: { e: PointerEvent; el: HTMLElement } | null = null;
@@ -1182,6 +1232,21 @@ export const boardView: View = {
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", onCancel);
     document.addEventListener("keydown", onKey, true);
+
+    /** An HTML drag is on (the taskboard's tasks, a task from the details panel): redraws wait for its end. */
+    let htmlDrag = false;
+    const onHtmlDragStart = (): void => { htmlDrag = true; };
+    const onHtmlDragEnd = (): void => {
+      if (!htmlDrag) return;
+      htmlDrag = false;
+      // after the drop's own handlers ran on the grid they were dropped on
+      setTimeout(() => { if (alive && !htmlDrag && !drag && drawAfterDrag) { drawAfterDrag = false; draw(); } }, 0);
+    };
+    document.addEventListener("dragstart", onHtmlDragStart, true);
+    document.addEventListener("dragend", onHtmlDragEnd, true);
+    document.addEventListener("drop", onHtmlDragEnd, true);
+    // no mouse moves come during an HTML drag: one means it is over, even when its end was not heard
+    document.addEventListener("mousemove", onHtmlDragEnd, true);
 
     /** The browser took the pointer (a touch turned into a scroll): no drop, nothing left half done. */
     function onCancel(): void {
@@ -1246,20 +1311,20 @@ export const boardView: View = {
         }
         const col = under.closest<HTMLElement>(".col");
         if (!col) return;
-        const body = col.querySelector<HTMLElement>(".col-body")!;
-        const cards = [...body.querySelectorAll<HTMLElement>(":scope > .card")].filter((c) => c !== drag!.src);
-        let before = 0;
-        let after = 0;
-        let ref: HTMLElement | null = null;
-        for (const c of cards) {
-          const r = c.getBoundingClientRect();
-          if (y < r.top + r.height / 2) { ref = c; break; }
-          before = Number(c.dataset.id);
-        }
-        after = ref ? Number(ref.dataset.id) : 0;
-        col.classList.add("drop");
-        if (ref) body.insertBefore(marker, ref); else body.append(marker);
-        drag.target = { type: "col", col: col.dataset.col!, before, after };
+        // a split column: the half under the pointer (on the head: Doing)
+        const body = under.closest<HTMLElement>(".col-body") ?? col.querySelector<HTMLElement>(".col-body")!;
+        const els = [...body.querySelectorAll<HTMLElement>(":scope > .card")].filter((c) => c !== drag!.src);
+        // while a search lifts matches, the neighbours are of the dragged card's kind, in their backlog order
+        const srcHit = drag.src.classList.contains("hit");
+        const { before, after } = placeAmong(els.map((c) => { const r = c.getBoundingClientRect(); return { id: Number(c.dataset.id), hit: c.classList.contains("hit"), mid: r.top + r.height / 2 }; }), srcHit, y);
+        const ref = after ? els.find((c) => Number(c.dataset.id) === after) : undefined;
+        const prev = before ? els.find((c) => Number(c.dataset.id) === before) : undefined;
+        (body.classList.contains("col-half") ? body : col).classList.add("drop");
+        if (ref) body.insertBefore(marker, ref);
+        else if (prev) prev.after(marker);
+        else if (srcHit) { const top = body.querySelector(":scope > .col-half-head"); if (top) top.after(marker); else body.prepend(marker); }
+        else body.append(marker);
+        drag.target = { type: "col", col: col.dataset.col!, before, after, done: body.dataset.done === "1" };
       } else {
         const epic = under.closest<HTMLElement>(".epic-box");
         const feat = under.closest<HTMLElement>(".rail .feat:not(.orphan)");
@@ -1316,7 +1381,7 @@ export const boardView: View = {
         }
         if (t.type === "col") {
           const col = current.cols.find((c) => c.name === t.col);
-          if (col) void moveCard(w, col, t.before, t.after);
+          if (col) void moveCard(w, col, t.before, t.after, t.done);
         }
       } else {
         if (t.type === "epic") void app.actions.reparent(d.id, t.id);
@@ -1328,25 +1393,42 @@ export const boardView: View = {
      * Move a card to a column, between two cards there (0 = none): the column, the backlog order, or both
      * with one message and one Undo. A card whose order already puts it there keeps its order.
      */
-    async function moveCard(w: WorkItem, col: Column, before: number, after: number): Promise<void> {
+    async function moveCard(w: WorkItem, col: Column, before: number, after: number, done = false): Promise<void> {
       const from = current.cards.find((c) => c.w.id === w.id)?.col;
       const place = (before || after) && !alreadyBetween(w, ws.get(before), ws.get(after));
-      if (col === from) { if (place) await app.actions.reorder(w.id, before, after); return; }
+      // the Doing or Done half: a split column keeps it in the board's done field; another column starts in Doing
+      const doneField = mode() === "columns" ? ws.board?.doneField : undefined;
+      const doneTo = col.split ? done : false;
+      const setDone = !!doneField && doneTo !== Boolean(w.boardDone) && (col.split || col !== from);
+      const halfStep = (): { label: string; run: (wr: Writer) => Promise<WriteResult> } =>
+        ({ label: `#${w.id} to ${col.name} ${doneTo ? "Done" : "Doing"}`, run: (wr) => wr.setFields(w.id, [{ field: doneField!, value: doneTo }]) });
+      const orderStep = (): { label: string; run: (wr: Writer) => Promise<WriteResult> } =>
+        ({ label: `Priority of #${w.id}`, run: async (wr) => readAfterUndo(await wr.reorder(w.id, before, after), () => ws.refresh(w.id)) });
+      if (col === from) {
+        if (!setDone) { if (place) await app.actions.reorder(w.id, before, after); return; }
+        await app.actions.batch(`#${w.id} → ${col.name} ${doneTo ? "Done" : "Doing"}`, [halfStep(), ...(place ? [orderStep()] : [])]);
+        return;
+      }
       const target = mode() === "columns" ? { column: col.name } : { state: col.states[w.type] ?? col.name };
-      if (!place || app.actions.readOnly) { await app.actions.move(w.id, target); return; }
+      if ((!place && !setDone) || app.actions.readOnly) { await app.actions.move(w.id, target); return; }
       // the move first, by itself: when a rule stops it, the usual dialog (move anyway, open), then the place
       let moved: WriteResult;
       try {
         moved = await app.actions.writer.move(w.id, target);
       } catch (e) {
         if (!(e instanceof RuleError)) { toast(errorText(e), { kind: "error" }); return; }
-        if (await app.actions.move(w.id, target)) await app.actions.reorder(w.id, before, after);
+        if (await app.actions.move(w.id, target)) {
+          if (setDone) await app.actions.setField(w.id, doneField!, doneTo, `#${w.id}: ${col.name} ${doneTo ? "Done" : "Doing"}`);
+          if (place) await app.actions.reorder(w.id, before, after);
+        }
         return;
       }
       const prev = ws.get(before);
-      await app.actions.batch(`#${w.id} → ${col.name}, ${prev ? `after #${prev.id}` : "at the top"}`, [
+      const where = place ? `, ${prev ? `after #${prev.id}` : "at the top"}` : "";
+      await app.actions.batch(`#${w.id} → ${col.name}${col.split ? ` ${doneTo ? "Done" : "Doing"}` : ""}${where}`, [
         { label: `#${w.id} to ${col.name}`, run: async () => moved },
-        { label: `Priority of #${w.id}`, run: async (wr) => readAfterUndo(await wr.reorder(w.id, before, after), () => ws.refresh(w.id)) },
+        ...(setDone ? [halfStep()] : []),
+        ...(place ? [orderStep()] : []),
       ]);
     }
 
@@ -1358,7 +1440,7 @@ export const boardView: View = {
       // "No parent Feature": only take away a Feature parent, never a link to another level
       const p = ws.get(w.parent);
       const reparent = featureId !== card.feature && (featureId !== 0 || (!!p && !!featLevel?.types.includes(p.type)));
-      if (!(row.path && rowOf(rows, w.iteration).key !== row.key)) {
+      if (!row.path || !movesToRow(rows, row, w.iteration)) {
         if (reparent) await app.actions.reparent(w.id, featureId);
         return;
       }
@@ -1415,7 +1497,7 @@ export const boardView: View = {
         ...current.cards.map((c) => {
           const f = ws.get(c.feature);
           const e = f ? ws.get(f.parent) : undefined;
-          return [c.w.id, c.w.type, c.w.title, c.col.name, c.w.state, f?.title ?? "", e?.title ?? "", c.w.assignedTo?.displayName ?? "", c.w.tags.join("; "), c.w.effort ?? "",
+          return [c.w.id, c.w.type, c.w.title, c.col.split ? `${c.col.name} ${c.w.boardDone ? "Done" : "Doing"}` : c.col.name, c.w.state, f?.title ?? "", e?.title ?? "", c.w.assignedTo?.displayName ?? "", c.w.tags.join("; "), c.w.effort ?? "",
             c.w.iteration, daysInColumn(c.w, columnSince), c.tasks.filter(isDone).length, c.tasks.length, c.pr.done, c.pr.counted.length, c.missing.join(", ")];
         }),
       ] };
@@ -1528,8 +1610,9 @@ export const boardView: View = {
         const list = current.cards.filter((x) => x.feature === c.feature && rowOf(rows, x.w.iteration).key === row);
         limits.set(key, limitShowing(list.indexOf(c), limitOf(key, CELL_CAP), CELL_CAP));
       } else {
-        const key = `col:${c.col.name}`;
-        const list = current.cards.filter((x) => x.col === c.col);
+        const done = Boolean(c.col.split && c.w.boardDone);
+        const key = colKey(c.col, done);
+        const list = current.cards.filter((x) => x.col === c.col && (!c.col.split || Boolean(x.w.boardDone) === done));
         limits.set(key, limitShowing(list.indexOf(c), limitOf(key, COLUMN_CAP), COLUMN_CAP));
       }
       return true;
@@ -1814,6 +1897,10 @@ export const boardView: View = {
         window.removeEventListener("pointerup", onUp);
         window.removeEventListener("pointercancel", onCancel);
         document.removeEventListener("keydown", onKey, true);
+        document.removeEventListener("dragstart", onHtmlDragStart, true);
+        document.removeEventListener("dragend", onHtmlDragEnd, true);
+        document.removeEventListener("drop", onHtmlDragEnd, true);
+        document.removeEventListener("mousemove", onHtmlDragEnd, true);
       },
     };
   },
