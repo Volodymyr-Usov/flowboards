@@ -17,11 +17,11 @@ import { filterBar, peopleStrip, processFieldNames } from "../ui/filterbar.ts";
 import { pageBar } from "../ui/pagebar.ts";
 import { undoAll } from "../ui/actions.ts";
 import { avatar, closePopup, dialog, errorText, help, popup, segmented, stateMark, toast, toggle, typeMark } from "../ui/kit.ts";
-import type { Away, TeamEvent } from "./daysoff.ts";
-import { addRange, awayFrom, eventDays, followTo, rangeSummary, removeRange, splitBySprint } from "./daysoff.ts";
+import type { Away, DaysOffChange, TeamEvent } from "./daysoff.ts";
+import { applyDaysOff, awayFrom, eventDays, followTo, rangeSummary, splitBySprint } from "./daysoff.ts";
 import type { Day } from "./timeaxis.ts";
 import {
-  addMonths, dayIso, dayKey, fmtDay, fmtSpan, localDay, monthGrid, monthKey, monthStart, packLanes, parseMonthKey, parts, planDay, todayDay, weekday,
+  addMonths, dayKey, fmtDay, fmtSpan, localDay, monthGrid, monthKey, monthStart, packLanes, parseMonthKey, parts, planDay, planIso, todayDay, weekday,
 } from "./timeaxis.ts";
 
 const TARGET = "Microsoft.VSTS.Scheduling.TargetDate";
@@ -29,6 +29,8 @@ const DUE = "Microsoft.VSTS.Scheduling.DueDate";
 const DRAG_TYPE = "application/x-calendar-item";
 const PER_DAY = 4;
 const AGENDA_DAYS = 60;
+/** a change on the page reads the Scheduler's storage again at most this often */
+const SCHED_EVERY = 60_000;
 
 type Mode = "month" | "agenda";
 
@@ -57,25 +59,30 @@ export interface DayOffTarget { event?: TeamEvent; away?: { person?: Person; sta
 const eventStore = (app: App): TeamStore<TeamEvent> => new TeamStore<TeamEvent>(app.api, collectionName("events", app.ws.project, app.ws.team));
 const workDaysOf = (app: App): number[] => app.ws.settings.workingDays?.length ? app.ws.settings.workingDays : [1, 2, 3, 4, 5];
 
-/** Change one person's (or the team's) days off in one sprint, keeping everything else. Gives back the Undo. */
-async function changeDaysOff(app: App, it: Iteration, person: Person | undefined, change: (list: { start: string; end: string }[]) => { start: string; end: string }[]): Promise<() => Promise<void>> {
+/**
+ * Add or remove one range of one person's (or the team's) days off in one sprint. The sprint's days
+ * off are read again just before writing and only this range changes, so a change someone else made
+ * meanwhile stays. Gives back the Undo, which takes back only the days this change really changed.
+ */
+async function changeDaysOff(app: App, it: Iteration, person: Person | undefined, change: DaysOffChange): Promise<() => Promise<void>> {
   const ws = app.ws;
-  const cap = await app.api.capacity(ws.project, ws.team, it.id);
-  if (!person) {
-    const old = cap.teamDaysOff;
-    await app.actions.setTeamDaysOff(ws.project, ws.team, it.id, change(old), it.name);
-    return () => app.actions.setTeamDaysOff(ws.project, ws.team, it.id, old, it.name);
-  }
-  const find = (c: Capacity) => c.members.find((x) => personKey(x.person) === personKey(person));
-  const m = find(cap);
-  const old = m?.daysOff ?? [];
-  const activities = m?.activities.length ? m.activities : [{ name: "", capacityPerDay: 0 }];
-  await app.actions.setCapacity(ws.project, ws.team, it.id, person.id!, { activities, daysOff: change(old) }, person.displayName, it.name);
-  return async () => {
-    // hours per day may have changed meanwhile: only the days off go back
-    const now = find(await app.api.capacity(ws.project, ws.team, it.id));
-    await app.actions.setCapacity(ws.project, ws.team, it.id, person.id!, { activities: now?.activities.length ? now.activities : activities, daysOff: old }, person.displayName, it.name);
+  const find = (c: Capacity) => c.members.find((x) => person && personKey(x.person) === personKey(person));
+  const write = async (ch: DaysOffChange): Promise<DaysOffChange> => {
+    const cap = await app.api.capacity(ws.project, ws.team, it.id);
+    if (!person) {
+      const r = applyDaysOff(cap.teamDaysOff, ch);
+      if (r.undo.ranges.length) await app.actions.setTeamDaysOff(ws.project, ws.team, it.id, r.list, it.name);
+      return r.undo;
+    }
+    const m = find(cap);
+    const r = applyDaysOff(m?.daysOff ?? [], ch);
+    // hours per day stay as they are now
+    const activities = m?.activities.length ? m.activities : [{ name: "", capacityPerDay: 0 }];
+    if (r.undo.ranges.length) await app.actions.setCapacity(ws.project, ws.team, it.id, person.id!, { activities, daysOff: r.list }, person.displayName, it.name);
+    return r.undo;
   };
+  const undo = await write(change);
+  return async () => { if (undo.ranges.length) await write(undo); };
 }
 
 /** One Undo for the changes made, then `onChange` (also when the Undo fails). */
@@ -162,9 +169,9 @@ export async function dayOffDialog(app: App, opts: { kind?: DayOffKind; person?:
           if (k === "off" && !person?.id) { toast("This person is not a team member in Azure DevOps, so a day off cannot be kept for them.", { kind: "error" }); return false; }
           const was = edit?.away;
           const wasIt = was ? ws.iterations.find((x) => x.id === was.iterationId) : undefined;
-          if (was && wasIt) undos.push(await changeDaysOff(app, wasIt, was.person, (list) => removeRange(list, was.start, was.end)));
+          if (was && wasIt) undos.push(await changeDaysOff(app, wasIt, was.person, { op: "remove", ranges: [{ start: was.start, end: was.end }] }));
           const { parts, outside } = splitBySprint(a, b, ws.iterations);
-          for (const p of parts) undos.push(await changeDaysOff(app, p.iteration, person, (list) => addRange(list, p.start, p.end)));
+          for (const p of parts) undos.push(await changeDaysOff(app, p.iteration, person, { op: "add", ranges: [{ start: p.start, end: p.end }] }));
           const whose = person ? ` for ${person.displayName}` : "";
           msg = `${was ? "Day off changed" : k === "teamoff" ? "Team day off added" : "Day off added"}${whose}: ${fmtSpan({ start: a, end: b })}`
             + (outside ? `; ${outside} day${outside === 1 ? "" : "s"} outside any sprint not kept` : "");
@@ -195,7 +202,7 @@ export async function removeDayOff(app: App, target: DayOffTarget, label: string
     } else if (target.away) {
       const a = target.away;
       const it = app.ws.iterations.find((x) => x.id === a.iterationId);
-      if (it) undos.push(await changeDaysOff(app, it, a.person, (list) => removeRange(list, a.start, a.end)));
+      if (it) undos.push(await changeDaysOff(app, it, a.person, { op: "remove", ranges: [{ start: a.start, end: a.end }] }));
     }
     toast(`Removed: ${label}`, { kind: "ok", undo: undoThen(undos, onChange) });
   } catch (e) { toast(errorText(e), { kind: "error" }); }
@@ -224,6 +231,7 @@ export const calendarView: View = {
     // the stories the team's schedules make in sight: small icons that lead to the Scheduler
     let scheduled = new Map<Day, Sched[]>();
     let schedKey = "";
+    let schedAt = 0; // when the schedules were read: a poll reads them again at most once a minute
     let extrasKey = "";
     let extrasToken = 0; // only the newest read may set days off and events
     if (st.mode !== "month" && st.mode !== "agenda") st.mode = "month";
@@ -245,6 +253,7 @@ export const calendarView: View = {
     const shows = (w: WorkItem): boolean => fb.test(w) && people.test(w) && textMatch(search.words(), w);
     const filtering = (): boolean => fb.active() || people.active() || search.words().length > 0;
     const count = h("span.small.muted.filter-count");
+    const readNote = h("button.btn.small.cal-readnote", { type: "button", hidden: true, onclick: () => void loadExtras(true) });
 
     // ---------- page ----------
     const title = h("h2.cal-title");
@@ -273,7 +282,7 @@ export const calendarView: View = {
     // line 2: filters, the month and Add; the count at the end. Line 3: people, then how it shows
     bar.line2.append(fb.el, nav,
       h("button.btn.small", { title: app.actions.readOnly ? "Read-only: nothing can be added here" : "Add a day off for a person, a team day off, or a team event", disabled: app.actions.readOnly, onclick: () => addAt() }, icon("plus", 14), "Add"));
-    bar.end.append(count);
+    bar.end.append(readNote, count);
     bar.line3.append(people.el,
       segmented<Mode>([
         { value: "month", label: "Month", title: "Show a month as a grid" },
@@ -354,17 +363,33 @@ export const calendarView: View = {
       extrasKey = key;
       const token = ++extrasToken;
       const touched = sprints().filter((sp) => sp.end >= r.start && sp.start <= r.end).map((sp) => sp.it);
+      // a read that fails is said, not shown as "nobody is off"; it is not kept, so the next read tries again
+      const failed: string[] = [];
+      let eventsFailed = false;
       try {
         const caps = await Promise.all(touched.map(async (it) => {
-          if (force || !capCache.has(it.id)) capCache.set(it.id, await app.api.capacity(ws.project, ws.team, it.id).catch(() => ({ members: [], teamDaysOff: [] } as Capacity)));
-          return { iteration: it, capacity: capCache.get(it.id)! };
+          if (force || !capCache.has(it.id)) {
+            try { capCache.set(it.id, await app.api.capacity(ws.project, ws.team, it.id)); } catch { failed.push(it.name); }
+          }
+          const capacity = capCache.get(it.id);
+          return capacity ? { iteration: it, capacity } : null;
         }));
-        const evs = (await events.all().catch(() => [] as TeamEvent[])).filter((e) => e.kind === "event");
+        const evs = (await events.all().catch(() => { eventsFailed = true; return [] as TeamEvent[]; })).filter((e) => e.kind === "event");
         if (token !== extrasToken) return; // a newer month was asked for meanwhile
-        away = awayFrom(caps);
+        away = awayFrom(caps.filter((c): c is { iteration: Iteration; capacity: Capacity } => c != null));
         teamEvents = evs;
+        showReadNote(failed, eventsFailed);
       } catch (e) { if (token === extrasToken) toast(errorText(e), { kind: "error" }); }
       if (token === extrasToken) draw(false);
+    }
+
+    /** A small note when days off or events could not be read; a click reads them again. */
+    function showReadNote(failed: string[], eventsFailed: boolean): void {
+      const what = [failed.length ? "Days off" : "", eventsFailed ? "team events" : ""].filter(Boolean).join(" and ");
+      readNote.hidden = !what;
+      if (!what) return;
+      readNote.replaceChildren(icon("warn", 12), `${what.charAt(0).toUpperCase()}${what.slice(1)} could not be read`);
+      readNote.title = `${failed.length ? `Could not read the days off of ${failed.join(", ")}. ` : ""}${eventsFailed ? "Could not read the team events. " : ""}Click to try again.`;
     }
 
     async function loadScheduled(force = false): Promise<void> {
@@ -372,6 +397,7 @@ export const calendarView: View = {
       const key = `${r.start}-${r.end}`;
       if (!force && key === schedKey) return;
       schedKey = key;
+      schedAt = Date.now();
       try {
         const [list, runs] = await Promise.all([loadSchedules(app), runStore(app).all().catch(() => [])]);
         const map = new Map<Day, Sched[]>();
@@ -456,7 +482,7 @@ export const calendarView: View = {
       const cur = planDay(field === DUE ? it.dueDate : it.targetDate);
       if (cur === day) return;
       const name = field === DUE ? "due date" : "target date";
-      await app.actions.setField(id, field, dayIso(day), `#${id} ${short(it.title)}: ${name} ${fmtDay(day)}`);
+      await app.actions.setField(id, field, planIso(day), `#${id} ${short(it.title)}: ${name} ${fmtDay(day)}`);
     }
     async function clearDate(id: number, field: string): Promise<void> {
       const it = ws.get(id);
@@ -601,7 +627,7 @@ export const calendarView: View = {
         });
         return row;
       });
-      return h("div.cal-month", { role: "grid", "aria-label": fmtDay(st.month, { month: "long", year: "numeric" }) }, dows, rows);
+      return h("div.cal-month", { role: "group", "aria-label": fmtDay(st.month, { month: "long", year: "numeric" }) }, dows, rows);
     }
 
     // ---------- agenda ----------
@@ -686,7 +712,7 @@ export const calendarView: View = {
     draw();
 
     return {
-      update() { fb.refresh(); void loadScheduled(true); draw(); },
+      update() { fb.refresh(); void loadScheduled(Date.now() - schedAt >= SCHED_EVERY); draw(); },
       select(id) {
         selected = id;
         for (const e of el.querySelectorAll<HTMLElement>(".cal-chip.sel, .cal-arow.sel")) e.classList.remove("sel");

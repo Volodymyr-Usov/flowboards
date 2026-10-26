@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Iteration } from "../src/api/types.ts";
-import { addRange, awayFrom, followTo, rangeSummary, removeRange, splitBySprint, workingDaysIn } from "../src/views/daysoff.ts";
+import { addRange, applyDaysOff, awayFrom, dayRanges, followTo, rangeSummary, removeRange, splitBySprint, workingDaysIn } from "../src/views/daysoff.ts";
 import { planDay } from "../src/views/timeaxis.ts";
 
 const d = (s: string): number => planDay(s + "T00:00:00Z")!;
@@ -50,4 +50,23 @@ test("the summary counts working days and names the sprints", () => {
   assert.equal(rangeSummary(d("2026-12-01"), d("2026-12-01"), "off", s, wd).ok, false);
   assert.equal(rangeSummary(d("2026-12-01"), d("2026-12-02"), "event", s, wd).text, "2 days");
   assert.equal(workingDaysIn(d("2026-10-19"), d("2026-10-25"), wd), 5);
+});
+
+test("Undo of a day-off change takes back only what it changed, on the list as it is now", () => {
+  const z = (s: string, e = s) => ({ start: s + "T00:00:00Z", end: e + "T00:00:00Z" });
+  assert.deepEqual(dayRanges([d("2026-10-07"), d("2026-10-05"), d("2026-10-06"), d("2026-10-09")]),
+    [{ start: d("2026-10-05"), end: d("2026-10-07") }, { start: d("2026-10-09"), end: d("2026-10-09") }]);
+  // 6 October was already off: adding 5 to 7 October really added 5 and 7
+  const add = applyDaysOff([z("2026-10-06")], { op: "add", ranges: [{ start: d("2026-10-05"), end: d("2026-10-07") }] });
+  assert.deepEqual(add.list, [z("2026-10-05", "2026-10-07")]);
+  assert.deepEqual(add.undo, { op: "remove", ranges: [{ start: d("2026-10-05"), end: d("2026-10-05") }, { start: d("2026-10-07"), end: d("2026-10-07") }] });
+  // meanwhile someone added 20 October: Undo keeps it, and keeps 6 October
+  const back = applyDaysOff([...add.list, z("2026-10-20")], add.undo);
+  assert.deepEqual(back.list, [z("2026-10-06"), z("2026-10-20")]);
+  // removing takes back only the days that were off
+  const rem = applyDaysOff([z("2026-10-06", "2026-10-07")], { op: "remove", ranges: [{ start: d("2026-10-05"), end: d("2026-10-08") }] });
+  assert.deepEqual(rem.list, []);
+  assert.deepEqual(rem.undo, { op: "add", ranges: [{ start: d("2026-10-06"), end: d("2026-10-07") }] });
+  // nothing to change: nothing for Undo
+  assert.deepEqual(applyDaysOff([z("2026-10-06")], { op: "add", ranges: [{ start: d("2026-10-06"), end: d("2026-10-06") }] }).undo.ranges, []);
 });
