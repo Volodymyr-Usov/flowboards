@@ -30,6 +30,7 @@ import { StyleService } from "./style.ts";
 import { tabOrder } from "../core/workstyle.ts";
 import { installHints } from "../ui/hints.ts";
 import { applyBlocks, blk, installCrosses, onBlocksChange, setTabBlocks, tabOff } from "../ui/blocks.ts";
+import { scopeFilters } from "../ui/filterbar.ts";
 
 export type Theme = "auto" | "light" | "dark";
 
@@ -80,6 +81,8 @@ export async function startApp(api: Api, host: HostContext | null, project: stri
   // tabindex -1: "Skip to content" and a new page move the focus here
   const main = h("main.view-host", { id: "view", tabindex: -1 });
   initDrafts(`${api.ctx.orgName}/${project}`);
+  // each team keeps its own filters and person chips
+  scopeFilters(project, team, api.ctx.orgName);
   // in Azure DevOps this page is a frame and the browser's address is the host's: the place (view and
   // open item) is copied into the host's hash, and read back from it when the page starts
   type HostNav = { getHash?: () => Promise<string>; replaceHash?: (hash: string) => unknown };

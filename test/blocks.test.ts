@@ -1,6 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { blockOff, blocksOff, resetBlocks, setBlockShown, tabOff } from "../src/ui/blocks.ts";
+import { blockOff, blocksOff, CROSS_ARM_MS, crossArmed, resetBlocks, setBlockShown, tabOff } from "../src/ui/blocks.ts";
+
+test("a cross hides its block only after a mouse has been on it (never on a plain tap)", () => {
+  const el = {} as Element;
+  const other = {} as Element;
+  assert.equal(crossArmed(null, el, 1000), false, "a touch is no hover");
+  assert.equal(crossArmed({ el, since: 1000 }, el, 1000 + CROSS_ARM_MS - 1), false, "just arrived");
+  assert.equal(crossArmed({ el, since: 1000 }, el, 1000 + CROSS_ARM_MS), true);
+  assert.equal(crossArmed({ el: other, since: 0 }, el, 5000), false, "the mouse is on another block");
+});
 
 test("every block shows until it is switched off, and Show everything undoes it", () => {
   // no document in the tests: only the choice itself is checked
