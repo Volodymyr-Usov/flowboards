@@ -5,10 +5,11 @@ import type { App, View } from "../app/context.ts";
 import type { Level, Update, WorkItem } from "../api/types.ts";
 import type { Bin, CfdCategory } from "../core/metrics.ts";
 import {
-  ageClass, cfdSeries, cycleDays, dailyCounts, dayIndex, dayIso, histogram, likelyAtLeast, likelyWithin, niceTicks,
-  percentile, rollingMean, simulateHowMany, simulateWhen, stageDates, weeklySums, workAge,
+  ageClass, asLocal, cfdSeries, cycleDays, dailyCounts, dayIndex, dayIso, dayOfKey, histogram, likelyAtLeast, likelyWithin, niceTicks,
+  noStartDate, percentile, rollingMean, simulateHowMany, simulateWhen, stageDates, weeklySums, workAge,
 } from "../core/metrics.ts";
 import { DAY, daysInState, isOpen, orderedStates, statesOf } from "../core/model.ts";
+import { ofTeam } from "../core/scope.ts";
 import { prefs } from "../core/settings.ts";
 import type { Child } from "../ui/dom.ts";
 import { debounce, h, icon, replace, svg } from "../ui/dom.ts";
@@ -31,6 +32,11 @@ const MAX_AHEAD = 3 * 365;
 const BATCH = 400;
 /** Cumulative flow by board column reads each item's history: at most this many, the newest first. */
 const MAX_HISTORY = 1500;
+/** History reads at once, and the pause (ms) after each, so the poll and other reads get their turn */
+const HISTORY_AT_ONCE = 3;
+const HISTORY_PAUSE = 40;
+/** Forecast runs kept, by their inputs: a redraw with the same history does not simulate again */
+const RUNS_KEPT = 8;
 
 /** Stack order of the cumulative flow diagram, bottom to top, with words and colors. */
 const CFD_LAYERS: { cat: CfdCategory; label: string; color: string }[] = [
@@ -110,6 +116,17 @@ export const flowView: View = {
     /** the forecast's two charts, redrawn on their own when an answer's input changes */
     const fc = new Map<HTMLElement, { box: HTMLElement; draw: (w: number) => Child }>();
     let lastWidth = 0;
+    /** forecast runs by their inputs (the daily samples and the question): a poll that changes nothing else does not run 10,000 again */
+    const runsMemo = new Map<string, number[]>();
+    const memoRuns = (key: string, make: () => number[]): number[] => {
+      let runs = runsMemo.get(key);
+      if (!runs) {
+        runs = make();
+        runsMemo.set(key, runs);
+        if (runsMemo.size > RUNS_KEPT) runsMemo.delete(runsMemo.keys().next().value!);
+      }
+      return runs;
+    };
 
     const status = h("span.muted.small", { role: "status" });
     const body = h("div.flow-body");
@@ -163,7 +180,7 @@ export const flowView: View = {
     /** Line 3: the type and tag filters. The tags are those of the level's items read so far. */
     function drawFilters(): void {
       const tags = new Set<string>();
-      const ofLevel = (w: WorkItem): boolean => level.types.includes(w.type);
+      const ofLevel = (w: WorkItem): boolean => level.types.includes(w.type) && ofTeam(ws, w);
       for (const w of ws.items.values()) if (ofLevel(w)) for (const t of w.tags) tags.add(t);
       for (const [k, list] of cache) if (k.startsWith(level.id + ":")) for (const w of list) for (const t of w.tags) tags.add(t);
       if (tagOnly) tags.add(tagOnly);
@@ -223,7 +240,8 @@ export const flowView: View = {
       const days = weeks * 7;
       const startDay = today - days + 1;
       const fetched = cache.get(key(startDay)) ?? [];
-      const ofLevel = (w: WorkItem): boolean => level.types.includes(w.type) && counts(w);
+      // only the team's own work: the workspace also holds parents in other teams' areas (their Features and Epics)
+      const ofLevel = (w: WorkItem): boolean => level.types.includes(w.type) && counts(w) && ofTeam(ws, w);
       const byId = new Map<number, WorkItem>();
       for (const w of fetched) if (counts(w)) byId.set(w.id, w);
       for (const w of ws.items.values()) if (ofLevel(w)) byId.set(w.id, w);
@@ -233,7 +251,8 @@ export const flowView: View = {
         .map((w) => Date.parse(w.closed!) > now ? { ...w, closed: new Date(now).toISOString() } : w);
       const open = [...ws.items.values()].filter((w) => ofLevel(w) && isOpen(w));
       const wip = open.filter((w) => w.category === "InProgress" || w.category === "Resolved");
-      const cycles = closed.map((w) => ({ w, days: cycleDays(w) ?? 0, t: Date.parse(w.closed!) })).sort((a, b) => a.t - b.t);
+      // t: the closed moment on the local day axis (days are local calendar days)
+      const cycles = closed.map((w) => ({ w, days: cycleDays(w) ?? 0, t: asLocal(w.closed!) })).sort((a, b) => a.t - b.t);
       const sorted = cycles.map((c) => c.days).sort((a, b) => a - b);
       const daily = dailyCounts(closed.map((w) => dayIndex(w.closed!)), startDay, days);
       const weekly = weeklySums(daily);
@@ -257,12 +276,17 @@ export const flowView: View = {
       const missing = items.filter((w) => hist.get(w.id)?.rev !== w.rev);
       if (missing.length) { void readHistory(missing); return null; }
       const cols = boardColumns(ws.process, level, ws.board, "columns");
-      const paths = new Map(items.map((w) => [w.id, columnPath(w, hist.get(w.id)!.ups, cols, ws.board!.columnField)]));
+      // the column moves on the local day axis, like every other chart here (the board helpers count UTC days)
+      const local = (p: ColumnStep[]): ColumnStep[] => p.map((s) => ({ ...s, at: new Date(asLocal(s.at)).toISOString() }));
+      const paths = new Map(items.map((w) => [w.id, local(columnPath(w, hist.get(w.id)!.ups, cols, ws.board!.columnField))]));
       const columns = cols.map((c) => c.name);
       return { columns, values: cfdByColumn([...paths.values()], columns, startDay, days), paths };
     }
 
-    /** Read the updates of these items, six at a time, then draw again. */
+    /**
+     * Read the updates of these items, three at a time with a short pause after each, then draw again:
+     * up to 1,500 reads must not hold up the workspace's poll and the other pages' reads.
+     */
     async function readHistory(items: WorkItem[]): Promise<void> {
       if (histBusy) return;
       histBusy = true;
@@ -271,9 +295,10 @@ export const flowView: View = {
       for (const w of newest.slice(MAX_HISTORY)) hist.set(w.id, { rev: w.rev, ups: null });
       const read = newest.slice(0, MAX_HISTORY);
       histNote.textContent = `0 of ${read.length.toLocaleString()}`;
-      await runLimited(read, 6, async (w) => {
+      await runLimited(read, HISTORY_AT_ONCE, async (w) => {
         const ups = await app.api.updates(w.project ?? ws.project, w.id).catch(() => null);
         hist.set(w.id, { rev: w.rev, ups });
+        await new Promise((r) => setTimeout(r, HISTORY_PAUSE));
       }, (done) => { histNote.textContent = `${done.toLocaleString()} of ${read.length.toLocaleString()}`; }, () => stopped);
       histBusy = false;
       if (!stopped && data && columnMode() && cache.has(currentKey())) render();
@@ -296,6 +321,8 @@ export const flowView: View = {
       const perWeek = d.closed.length / weeks;
       const perWeekText = perWeek.toFixed(perWeek > 0 && perWeek < 1 ? 2 : 1);
       const oldest = d.wip.reduce<WorkItem | null>((a, w) => (!a || workAge(w) > workAge(a) ? w : a), null);
+      // cycle time falls back to the created date when an item has no start date: say how many
+      const noStart = d.cycles.filter((c) => noStartDate(c.w)).length;
 
       const tiles = h("div.flow-tiles", null,
         tile(perWeekText, "Finished per week", `On average ${perWeekText} ${name} were finished per week over the last ${weeks} weeks (${d.closed.length} in all).`),
@@ -319,6 +346,8 @@ export const flowView: View = {
           card("", "Cycle time", "Each dot is one finished item: when it closed (across) and how many days it took from start to done (up). The lines show the time within which 50%, 85% and 95% of the items were done. Click a dot to open the item.",
             d.cycles.length ? `50% took ${fmtD(d.p50)} or less, 85% ${fmtD(d.p85)}, 95% ${fmtD(d.p95)}` : null,
             (w) => d.cycles.length ? cycleChart(d, w, tip, app) : h("p.muted.flow-none", null, "No items finished in this period."),
+            noStart ? h("p.small.muted.flow-nostart", { title: "These items never had a start date (Activated date), so their cycle time runs from the day they were created" },
+              `${plural(noStart, "item")} had no start date; ${noStart === 1 ? "its" : "their"} lead time (from created to done) is used.`) : null,
             tableView(["Item", "Finished", "Days"], [...d.cycles].reverse().map((c) => [itemLink(ws, c.w, (x) => app.openItem(x.id)), fmtDay(dayIndex(c.w.closed!), { month: "short", day: "numeric", year: "numeric" }), c.days.toFixed(1)]), [2])),
           card("", "Work in progress age", "Each dot is one item that is started but not done, in the column of its state, by days since work on it started. The color compares that age with how long finished items took from start to done: up to the 50% line, up to the 85% line, or beyond. The tooltip also shows the days in the current state. Click a dot to open the item.",
             d.wip.length ? `${plural(d.wip.length, "item")} in progress` : null,
@@ -424,7 +453,7 @@ export const flowView: View = {
         type: "date", min: dayIso(d.today + 1), max: dayIso(lastDay), value: dayIso(Math.min(forecastDay ?? d.today + 28, lastDay)),
         title: "The date to forecast to (at most 3 years ahead)", "aria-label": "Forecast date",
         onchange: () => {
-          const day = dateIn.value ? dayIndex(dateIn.value + "T00:00:00Z") : null;
+          const day = dateIn.value ? dayOfKey(dateIn.value) : null;
           dateNote.textContent = "";
           // not a real date (for example a 5-digit year): keep the last good one
           if (day !== null && !Number.isFinite(day)) { dateIn.value = dayIso(Math.min(forecastDay ?? d.today + 28, lastDay)); return; }
@@ -447,7 +476,7 @@ export const flowView: View = {
         const n = day - d.today;
         if (!enough) { manyOut.replaceChildren(h("p.muted", null, "No items finished in this period, so there is nothing to forecast from.")); return; }
         if (n <= 0) { manyOut.replaceChildren(h("p.muted", null, "Pick a date after today.")); return; }
-        const runs = simulateHowMany(samples, n, RUNS, 7);
+        const runs = memoRuns(`many|${n}|${samples.join(",")}`, () => simulateHowMany(samples, n, RUNS, 7));
         const at = [0.5, 0.85, 0.95].map((p) => ({ p, v: likelyAtLeast(runs, p) }));
         const bins = histogram(runs, 30);
         chartIn(manyOut,
@@ -460,7 +489,7 @@ export const flowView: View = {
         const target = forecastN ?? backlog;
         if (!enough) { whenOut.replaceChildren(h("p.muted", null, "No items finished in this period, so there is nothing to forecast from.")); return; }
         if (target <= 0) { whenOut.replaceChildren(h("p.muted", null, "Nothing open to finish.")); return; }
-        const runs = simulateWhen(samples, target, RUNS, 11, MAX_DAYS);
+        const runs = memoRuns(`when|${target}|${samples.join(",")}`, () => simulateWhen(samples, target, RUNS, 11, MAX_DAYS));
         const at = [0.5, 0.85, 0.95].map((p) => ({ p, v: likelyWithin(runs, p) }));
         if (at.some((a) => !Number.isFinite(a.v))) { whenOut.replaceChildren(h("p.muted", null, "Not enough finished items to forecast from.")); return; }
         const say = (v: number): string => v > MAX_DAYS ? "more than 10 years" : `by ${fmtLongDay(d.today + v)}`;

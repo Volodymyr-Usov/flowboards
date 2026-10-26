@@ -1,17 +1,29 @@
 // Pure flow math: percentiles, daily and weekly counts, cumulative flow and a seeded Monte Carlo
 // forecast. No page, no network: covered by test/metrics.test.ts.
-// Days are whole UTC days (dayIndex): the same item lands in the same day on every machine.
+// Days are the person's local calendar days (dayIndex): an item closed at 23:30 counts on that evening's
+// day, as the person saw it, not on the next UTC day. A day index is the number of that date since 1970.
 import type { Category } from "../api/types.ts";
 import { DAY } from "./model.ts";
 
-/** Whole UTC days since 1970 for an ISO date or a time in ms. */
+/** A moment (ISO or ms) moved so that its UTC date and time read as the local ones: day arithmetic in local days. */
+export function asLocal(t: string | number): number {
+  const ms = typeof t === "number" ? t : Date.parse(t);
+  return ms - new Date(ms).getTimezoneOffset() * 60_000;
+}
+
+/** The local calendar day of a moment (ISO date or time in ms), as days since 1970-01-01. */
 export function dayIndex(t: string | number): number {
-  return Math.floor((typeof t === "number" ? t : Date.parse(t)) / DAY);
+  return Math.floor(asLocal(t) / DAY);
 }
 
 /** ISO date (yyyy-mm-dd) of a day index. */
 export function dayIso(day: number): string {
   return new Date(day * DAY).toISOString().slice(0, 10);
+}
+
+/** The day index of a date typed as yyyy-mm-dd (a date box's value); NaN when it is not a date. */
+export function dayOfKey(ymd: string): number {
+  return Math.floor(Date.parse(ymd + "T00:00:00Z") / DAY);
 }
 
 export function mean(values: number[]): number {
@@ -74,6 +86,9 @@ export function stageDates(w: FlowDates): { proposed: string; inProgress?: strin
   out.completed = at(w.closed, "Completed");
   return out;
 }
+
+/** The item has no start date (activated), so its cycle time runs from when it was created (its lead time). */
+export const noStartDate = (w: FlowDates): boolean => !w.activated;
 
 /** Days from start of work (activated, else created) to closed; null when not closed. Never negative. */
 export function cycleDays(w: FlowDates): number | null {

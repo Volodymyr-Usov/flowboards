@@ -118,7 +118,8 @@ test("parent and children out of step", () => {
 });
 
 test("target date in the past", () => {
-  const f = run([item(1, "Theme", "Doing", { parent: 9, targetDate: "2026-10-20T00:00:00Z" }), item(2, "Theme", "Doing", { parent: 9, targetDate: "2026-10-21T00:00:00Z" }), item(3, "Theme", "Done", { parent: 9, targetDate: "2026-01-01T00:00:00Z" })]);
+  const f = run([item(1, "Theme", "Doing", { parent: 9, targetDate: "2026-10-20T00:00:00Z" }), item(2, "Theme", "Doing", { parent: 9, targetDate: "2026-10-21T00:00:00Z" }), item(3, "Theme", "Done", { parent: 9, targetDate: "2026-01-01T00:00:00Z" })],
+  { today: new Date(2026, 9, 21, 12).getTime() });
   assert.deepEqual(ids(f, "pastTarget"), [1]);
 });
 
