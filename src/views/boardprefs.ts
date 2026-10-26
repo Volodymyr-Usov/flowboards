@@ -42,16 +42,48 @@ export function columnShownPatch(o: Opts, c: { name: string; kind: string }, sho
   return { hiddenCols: shown ? hiddenCols : [...hiddenCols, c.name] };
 }
 
-/** The saved choices, with defaults for anything missing or out of range. */
-export function readBoardOpts(): Opts {
-  const o: Opts = { ...DEFAULTS, ...prefs.get<Partial<Opts>>(BOARD_KEY, {}) };
+/**
+ * Choices that belong to one team's board: its columns (by name) and its people. Kept per project and
+ * team, so hiding "Review" on one team's board does not hide another team's "Review". The other
+ * choices (what cards show, colours) are the person's own and the same on every board.
+ */
+export const TEAM_FIELDS = ["hiddenCols", "incoming", "closed", "hiddenPeople", "onlyPeople"] as const;
+type TeamField = (typeof TEAM_FIELDS)[number];
+
+/** Which team's board: "project/team". */
+export const boardScope = (ws: { project: string; team: string }): string => `${ws.project}/${ws.team}`;
+const teamKey = (scope: string): string => `${BOARD_KEY}:${scope}`;
+const pick = (o: Partial<Opts>, team: boolean): Partial<Opts> =>
+  Object.fromEntries(Object.entries(o).filter(([k]) => TEAM_FIELDS.includes(k as TeamField) === team)) as Partial<Opts>;
+
+/**
+ * The saved choices, with defaults for anything missing or out of range. With a scope, that team's
+ * columns and people; a team seen for the first time starts from the choices kept before they were
+ * per team (once).
+ */
+export function readBoardOpts(scope?: string): Opts {
+  const all = prefs.get<Partial<Opts>>(BOARD_KEY, {});
+  let team: Partial<Opts> = {};
+  if (scope) {
+    const kept = prefs.get<Partial<Opts> | null>(teamKey(scope), null);
+    if (kept) team = kept;
+    else { team = pick(all, true); prefs.set(teamKey(scope), team); }
+  }
+  const o: Opts = { ...DEFAULTS, ...pick(all, false), ...(scope ? team : pick(all, true)) };
   o.rules = { ...DEFAULT_RULES, ...o.rules };
   if (!["all", "open", "completed"].includes(o.prs)) o.prs = "all";
   if (o.layout !== "map") o.layout = "columns";
   return o;
 }
 
+/** Keep every choice: the team's part under its scope, the rest for every board. */
+export function writeBoardOpts(o: Opts, scope?: string): void {
+  if (!scope) { prefs.set(BOARD_KEY, { ...prefs.get<Partial<Opts>>(BOARD_KEY, {}), ...o }); return; }
+  prefs.set(BOARD_KEY, { ...prefs.get<Partial<Opts>>(BOARD_KEY, {}), ...pick(o, false) });
+  prefs.set(teamKey(scope), pick(o, true));
+}
+
 /** Change some choices (Settings): the Board reads them when it opens. */
-export function saveBoardOpts(patch: Partial<Opts>): void {
-  prefs.set(BOARD_KEY, { ...readBoardOpts(), ...patch });
+export function saveBoardOpts(patch: Partial<Opts>, scope?: string): void {
+  writeBoardOpts({ ...readBoardOpts(scope), ...patch }, scope);
 }

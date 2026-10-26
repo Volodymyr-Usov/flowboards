@@ -33,7 +33,7 @@ import { defaultLayout } from "../core/workstyle.ts";
 import { sprintChoices, taskboard } from "./taskboard.ts";
 import type { TaskboardInput } from "./taskboard.ts";
 import { burndownPanel } from "./burndownpanel.ts";
-import { BOARD_KEY, columnHidden, columnShownPatch, readBoardOpts } from "./boardprefs.ts";
+import { boardScope, columnHidden, columnShownPatch, readBoardOpts, writeBoardOpts } from "./boardprefs.ts";
 import { blk } from "../ui/blocks.ts";
 import type { Opts } from "./boardprefs.ts";
 import { DEFAULT_RULES, alreadyBetween, ruleGaps, boardColumns, readAfterUndo, capCards, cardOrder, nearestBox, CELL_CAP, FEATURE_CAP, clockClass, COLUMN_CAP, columnEnteredAt, columnOf, countOf, daysInColumn, featureGroups, groupBy, limitShowing, matches, missing, prCount, prLinks, rowOf, runLimited, sharesState, sprintRows, tint } from "./boardmodel.ts";
@@ -55,7 +55,9 @@ export const boardView: View = {
   about: "The team board with stories under their Features and Epics: drag a card to change its status, priority or parent. Taskboard: one sprint, its stories as rows and their tasks by state. Story map: one row per sprint; drag a card to another row to change its sprint.",
   mount(el, app) {
     const ws = app.ws;
-    const o: Opts = readBoardOpts();
+    // the columns and people hidden are this team's; the other choices are the person's own
+    const scope = boardScope(ws);
+    const o: Opts = readBoardOpts(scope);
     // the layout: chosen here for this team (this browser), else what the team's working style opens with
     type Layout = "columns" | "map" | "taskboard";
     const layoutKey = `board.layout:${ws.project}/${ws.team}`;
@@ -66,7 +68,7 @@ export const boardView: View = {
     let sprintPath: string | null = null;
     /** the taskboard's burndown (Scrum teams): one panel, read once per sprint */
     const burn = burndownPanel(app, { heading: "h3", foldKey: "board.burndownFolded" });
-    const save = (): void => prefs.set(BOARD_KEY, o);
+    const save = (): void => writeBoardOpts(o, scope);
     let selected: number | null = app.openId();
     const expanded = new Set<number>(); // stories showing their task list
     const columnSince = new Map<number, string>();
