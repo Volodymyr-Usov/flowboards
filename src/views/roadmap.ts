@@ -20,6 +20,7 @@ import { pageBar } from "../ui/pagebar.ts";
 import { avatar, closePopup, empty, errorText, help, itemPicker, menu, popup, segmented, toast, toggle, typeMark } from "../ui/kit.ts";
 import type { MenuItem } from "../ui/kit.ts";
 import { addDependencyChecked, removeDependencyAny } from "./deps.ts";
+import { ChildCounts } from "./childcounts.ts";
 import { cleanTeams, conflictCounts, dependencies, dependencyPairs, dragsFor, teamKey } from "./roadmaplogic.ts";
 import type { Dependency, TeamRef } from "./roadmaplogic.ts";
 import type { Day, Span } from "./timeaxis.ts";
@@ -90,6 +91,9 @@ export const roadmapView: View = {
     let firstDraw = true;
     let linkToken = 0;
     let alive = true;
+    // progress counts of the children that are not loaded (closed long ago, other teams' areas), read for the bars drawn
+    const childCounts = new ChildCounts(ws, () => draw());
+    const countIds = new Set<number>();
 
     // other teams on the roadmap: chosen in the Teams popup, kept per team in this browser
     const me: TeamRef = { project: ws.project, team: ws.team };
@@ -268,6 +272,13 @@ export const roadmapView: View = {
         };
         walk(it.id, 0);
       }
+      // and the children that are not loaded (closed long ago, other teams' areas), once read
+      if (kind === "requirement" || kind === "portfolio") {
+        const x = childCounts.extra(it.id);
+        done += x.done;
+        total += x.total;
+        countIds.add(it.id);
+      }
       if (!total) return { done: isDone(it) ? 1 : 0, total: 1 };
       return { done, total };
     }
@@ -369,7 +380,9 @@ export const roadmapView: View = {
       to = addMonths(hi, st.zoom === "quarters" ? 3 - (parts(hi).m % 3) : 1) - 1;
       const W = Math.round((to - from + 1) * ppd);
 
+      countIds.clear();
       const canvas = h("div.rm-canvas", { style: { width: nameW + W + "px" } }, header(W), body(W));
+      childCounts.want(countIds);
       scroll.replaceChildren(canvas);
       drawLegend(portfolio, req);
       drawUnscheduled(barOf);
@@ -1035,6 +1048,7 @@ export const roadmapView: View = {
     return {
       // stories closing or moving change the forecast: work it out again (one query)
       update(changed) {
+        childCounts.changed(changed);
         if (changed.size && st.forecast) { fcLoaded = false; fcDirty = fcLoading; }
         fb.refresh();
         draw();
@@ -1049,6 +1063,7 @@ export const roadmapView: View = {
       },
       unmount() {
         alive = false;
+        childCounts.stop();
         planToken++;
         endDrag();
         linkToken++;
