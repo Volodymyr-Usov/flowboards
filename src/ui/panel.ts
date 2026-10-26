@@ -8,7 +8,9 @@ import type { PullRequest, Update, WorkItem } from "../api/types.ts";
 import type { App } from "../app/context.ts";
 import type { CheckItem } from "../core/checklist.ts";
 import { cleanList, fromList, moveItem, newCheckItem, progress, tick } from "../core/checklist.ts";
+import { AC_FIELD, typeHasField } from "../core/health.ts";
 import { daysInState, daysSince, fmtDate, fmtDays, isDone, leaf, levelOf, orderedStates, plainText } from "../core/model.ts";
+import { fromYmd, planIso, planKey } from "../views/timeaxis.ts";
 import { cleanTemplates, missingChildren } from "../core/templates.ts";
 import { fieldLabel } from "../core/writes.ts";
 import { draftTasks, draftTexts } from "./aihelp.ts";
@@ -291,12 +293,28 @@ export function createPanel(app: App): Panel {
       sprintChoices(w.settings.backlogIteration ?? w.project, w.iterations, it.iteration, { ended: true }).map((c) => h("option", { value: c.path, selected: c.path === it.iteration }, c.label))),
       (v) => actions.setField(it.id, "System.IterationPath", v));
     const tagsCtl = tagsField(it, ro);
-    const num = (field: string, value: number | undefined, step = 1) => confirmed(h("input.input", {
-      type: "number", min: 0, step, value: value ?? "", disabled: ro, "aria-label": fieldLabel(field), dataset: { fkey: field },
-    }), (v) => actions.setField(it.id, field, v === "" ? "" : Number(v)), false);
-    const date = (field: string, value: string | undefined) => confirmed(h("input.input", {
-      type: "date", value: value ? value.slice(0, 10) : "", disabled: ro, "aria-label": fieldLabel(field), dataset: { fkey: field },
-    }), (v) => actions.setField(it.id, field, v ? new Date(v + "T00:00:00Z").toISOString() : ""));
+    // number and date boxes save only over the value they showed: a teammate's newer value is not overwritten
+    const saveOver = (field: string) => {
+      const from = { value: it.fields[field] };
+      return async (value: unknown) => {
+        const r = await actions.setField(it.id, field, value, undefined, from);
+        if (r) from.value = r.fields[field]; // the next save from this box goes over what it saved
+        return r;
+      };
+    };
+    const num = (field: string, value: number | undefined, step = 1) => {
+      const save = saveOver(field);
+      return confirmed(h("input.input", {
+        type: "number", min: 0, step, value: value ?? "", disabled: ro, "aria-label": fieldLabel(field), dataset: { fkey: field },
+      }), (v) => save(v === "" ? "" : Number(v)), false);
+    };
+    // a planning date is saved as midnight of this browser's zone, as Azure DevOps's own date picker does
+    const date = (field: string, value: string | undefined) => {
+      const save = saveOver(field);
+      return confirmed(h("input.input", {
+        type: "date", value: planKey(value), disabled: ro, "aria-label": fieldLabel(field), dataset: { fkey: field },
+      }), (v) => save(v ? planIso(dayOfKey(v)) : ""));
+    };
     const pf = w.process.fields;
     const typeFields = w.process.types[it.type]?.fields;
     const has = (f: string) => !typeFields || typeFields.includes(f);
@@ -321,7 +339,7 @@ export function createPanel(app: App): Panel {
       level?.kind !== "task" && has(pf.effort) ? row(fieldLabel(pf.effort), num(pf.effort, it.effort)) : null,
       level?.kind === "task" ? row("Remaining", num(pf.remaining, it.remaining, 0.5)) : null,
       level?.kind === "task" && it.originalEstimate != null ? row("Estimate", h("span", null, `${it.originalEstimate} h, done ${it.completedWork ?? 0} h`)) : null,
-      has("Microsoft.VSTS.Common.Priority") ? row("Priority", confirmed(h("select.input", { disabled: ro, "aria-label": "Priority", dataset: { fkey: "priority" } },
+      typeHasField(w.process, it.type, "Microsoft.VSTS.Common.Priority") ? row("Priority", confirmed(h("select.input", { disabled: ro, "aria-label": "Priority", dataset: { fkey: "priority" } },
         // "–" while it has none, so 1 can be picked too
         it.priority == null ? h("option", { value: "", selected: true }, "–") : null,
         [1, 2, 3, 4].map((p) => h("option", { value: p, selected: it.priority === p }, String(p)))),
@@ -337,7 +355,8 @@ export function createPanel(app: App): Panel {
 
     const sections: HTMLElement[] = [
       richSection("Description", "System.Description", it, ro, level?.kind !== "task"),
-      level?.kind !== "task" ? richSection("Acceptance criteria", "Microsoft.VSTS.Common.AcceptanceCriteria", it, ro, true) : h("span"),
+      // not every type has acceptance criteria (Basic's Issue, custom types): no box where there is no field
+      level?.kind !== "task" && typeHasField(w.process, it.type, AC_FIELD) ? richSection("Acceptance criteria", AC_FIELD, it, ro, true) : h("span"),
       notOurs ? h("span") : checklistSection(it, checkChip),
       notOurs ? h("span") : childrenSection(it),
       depsSection(it, ro),
@@ -363,7 +382,11 @@ export function createPanel(app: App): Panel {
     let keyed = false; // the last change came from the keyboard
     const id = currentId;
     const commit = (): void => {
-      if (saving || el.value === shown || el.disabled) return;
+      if (saving || el.disabled) return;
+      // a half-typed number or date reads as "" (the browser marks it as bad input): that is no change,
+      // the value shown before comes back and nothing is saved
+      if (el instanceof HTMLInputElement && (el.type === "number" || el.type === "date") && el.validity.badInput) { el.value = shown; return; }
+      if (el.value === shown) return;
       const v = el.value;
       saving = true;
       void save(v).then((r) => {
@@ -416,10 +439,14 @@ export function createPanel(app: App): Panel {
       const quote = (xs: string[]): string => xs.map((t) => `"${t}"`).join(", ");
       const msg = !removed.length ? `Tag ${quote(added)} added to #${it.id}` : !added.length ? `Tag ${quote(removed)} removed from #${it.id}` : `Tags of #${it.id} changed`;
       saving = true;
-      const r = await app.actions.setField(it.id, "System.Tags", want.join("; "), msg);
+      // only what was added or removed here is sent, applied to the item's newest tags: a tag a teammate
+      // added or removed meanwhile stays as they left it
+      const r = await app.actions.changeTags(it.id, added, removed, msg);
       saving = false;
-      if (!r) { ti.set(saved); if (currentId === it.id) void render(false, true); return; }
+      if (!r) { ti.set(saved); latest = saved; if (currentId === it.id) void render(false, true); return; }
       saved = want;
+      // nothing more waiting and nothing half-typed: show the tags as they are now, teammates' included
+      if (key(latest) === key(want) && !ti.input.value && key(r.tags) !== key(want)) { saved = latest = [...r.tags]; ti.set(r.tags); }
       void push();
     }
     return ti.el;
@@ -428,25 +455,35 @@ export function createPanel(app: App): Panel {
   function editableTitle(it: WorkItem, ro: boolean): HTMLElement {
     const hint = "Click to edit; Enter saves";
     const el = h("h2.panel-title", { contenteditable: ro ? "false" : "plaintext-only", spellcheck: "true", title: ro ? "" : hint }, it.title);
-    const giveUp = (): void => { el.textContent = it.title; el.classList.remove("editing", "unsaved"); el.title = hint; };
+    /** the title this box was opened with (or last saved): a save goes through only while the item still has it */
+    let base = it.title;
+    let bar: HTMLElement | null = null;
+    const giveUp = (): void => { bar?.remove(); bar = null; el.textContent = base; el.classList.remove("editing", "unsaved"); el.title = hint; catchUp(); };
     el.addEventListener("keydown", (e) => {
       if (e.key === "Enter") { e.preventDefault(); el.blur(); }
       // Esc puts the saved title back (and does not close the panel)
       if (e.key === "Escape") { e.preventDefault(); giveUp(); el.blur(); }
     });
     el.addEventListener("focus", () => el.classList.add("editing"));
-    el.addEventListener("blur", () => {
+    const save = (): void => {
       const v = (el.textContent ?? "").trim();
-      if (!v || v === it.title) { giveUp(); return; }
+      if (!v || v === base) { giveUp(); return; }
       // "editing" stays while saving, so a redraw meanwhile does not drop the typed text
-      void app.actions.setField(it.id, "System.Title", v).then((r) => {
+      void app.actions.setField(it.id, "System.Title", v, undefined, { value: base }).then((r) => {
         if (!el.isConnected) return;
-        if (r) { el.classList.remove("editing", "unsaved"); catchUp(); return; }
+        if (r) { base = r.title; bar?.remove(); bar = null; el.classList.remove("editing", "unsaved"); catchUp(); return; }
         // not saved: the typed text stays, with the reason; Enter tries again, Esc gives up
         el.classList.add("unsaved");
         el.title = `Not saved: ${app.actions.lastError || "Azure DevOps refused"}. Click, then Enter tries again; Esc puts the saved title back.`;
+        const theirs = app.actions.lastConflict ? ws().get(it.id)?.title : undefined;
+        if (theirs == null || bar) return;
+        bar = conflictBar("title",
+          () => { bar = null; base = ws().get(it.id)?.title ?? base; save(); },
+          () => { bar = null; base = ws().get(it.id)?.title ?? base; giveUp(); });
+        el.after(bar);
       });
-    });
+    };
+    el.addEventListener("blur", save);
     return el;
   }
 
@@ -470,6 +507,12 @@ export function createPanel(app: App): Panel {
     if (!plainText(ed.innerHTML) && !ed.querySelector("img")) ed.replaceChildren();
     /** what Azure DevOps has: the box read back the same way, so an untouched box saves nothing */
     let lastSaved = sanitizeToString(ed.innerHTML);
+    /**
+     * The field's value when the box was opened (or last saved), as Azure DevOps has it: a save goes
+     * through only while the item still has it, so a teammate's newer text is never overwritten unseen.
+     */
+    let base: unknown = it.fields[field];
+    let bar: HTMLElement | null = null;
     const status = h("span.save-state", { role: "status" });
     tools.append(status);
     let timer = 0;
@@ -486,13 +529,35 @@ export function createPanel(app: App): Panel {
       if (v === lastSaved) { if (!ed.classList.contains("unsaved")) setStatus(""); idle(); return; }
       saving = true;
       setStatus("Saving…");
-      const ok = await app.actions.saveTyped(it.id, field, plainText(v) || /<img/i.test(v) ? v : "");
+      const ok = await app.actions.saveTyped(it.id, field, plainText(v) || /<img/i.test(v) ? v : "", { value: base });
       saving = false;
       if (ok) {
         lastSaved = v;
+        base = ok.fields[field];
         ed.classList.remove("unsaved");
         setStatus("Saved", "ok");
         setTimeout(() => { if (status.textContent === "Saved") setStatus(""); }, 2000);
+      } else if (app.actions.lastConflict) {
+        // someone else saved this text meanwhile: theirs is not overwritten, mine stays in the box;
+        // the person chooses (typing on keeps asking, as the box is still behind)
+        ed.classList.add("unsaved");
+        setStatus("Not saved: changed by someone else meanwhile", "err");
+        if (!bar) {
+          bar = conflictBar(title.toLowerCase(),
+            () => { bar = null; base = ws().get(it.id)?.fields[field]; void save(); },
+            () => {
+              bar = null;
+              base = ws().get(it.id)?.fields[field];
+              ed.replaceChildren(sanitize(String(base ?? "")));
+              lockMentions(ed);
+              lastSaved = sanitizeToString(ed.innerHTML);
+              ed.classList.remove("unsaved");
+              setStatus("");
+              idle();
+              if (!ed.classList.contains("editing")) catchUp();
+            });
+          ed.after(bar);
+        }
       } else {
         // not saved: the typed text stays (and the box is not redrawn); the next change tries again
         ed.classList.add("unsaved");
@@ -878,6 +943,24 @@ export function createPanel(app: App): Panel {
     if (!parts.length) return null;
     return h("li", null, h("div.c-head", null, h("b", null, u.by.displayName), h("span.muted.small", null, fmtDate(u.date, { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }))),
       h("ul", null, parts.map((p) => h("li", null, p))));
+  }
+
+  /** The day of a date box's value ("2026-10-21"). */
+  function dayOfKey(v: string): number {
+    const [y, m, d] = v.split("-").map(Number);
+    return fromYmd(y, m - 1, d);
+  }
+
+  /**
+   * Shown under a box whose save was refused because someone else changed the same text meanwhile:
+   * keep mine (save it over theirs) or take theirs (their text replaces mine in the box).
+   */
+  function conflictBar(what: string, keepMine: () => void, takeTheirs: () => void): HTMLElement {
+    const bar = h("div.editbar.conflict-bar", { role: "alert" },
+      h("span.draft-note", null, `Someone else changed the ${what} meanwhile. Your text is still here.`),
+      h("button.btn.small", { type: "button", title: `Put their ${what} in the box; your text is dropped`, onclick: () => { bar.remove(); takeTheirs(); } }, "Take theirs"),
+      h("button.btn.small.primary", { type: "button", title: `Save your ${what} over theirs`, onclick: () => { bar.remove(); keepMine(); } }, "Keep mine"));
+    return bar;
   }
 
   /** A read from browser storage; null when the browser blocks storage (it throws then). */
