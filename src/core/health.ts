@@ -2,7 +2,8 @@
 // Pure functions: no page, no network. Process-agnostic: levels by kind, states by category.
 import { REL, relId } from "../api/api.ts";
 import type { Iteration, Level, ProcessInfo, WorkItem } from "../api/types.ts";
-import { DAY, daysSince, hasText, isDone, isOpen, levelOf, orderedStates } from "./model.ts";
+import { DAY, daysSince, hasText, isDone, isOpen, isRemoved, levelOf, orderedStates } from "./model.ts";
+import { planKey, todayKey } from "../views/timeaxis.ts";
 import type { Filter, Prop } from "./filters.ts";
 import { passesAll } from "./filters.ts";
 
@@ -55,7 +56,18 @@ export interface HealthInput {
   backlogRoot?: string;
   /** "now" in milliseconds */
   today: number;
+  /**
+   * Linked children that are not among the items (another team's area, closed long ago), as read:
+   * done, open, or gone (removed). A child missing here was not read: it may be open.
+   */
+  outside?: Map<number, ChildState>;
 }
+
+/** A linked child as read for "Could be closed": done, open (or could not be read), or gone (removed: does not count). */
+export type ChildState = "done" | "open" | "gone";
+
+/** The state of a child for "Could be closed"; a child that could not be read may be open. */
+export const childState = (w: WorkItem | undefined): ChildState => (!w ? "open" : isRemoved(w) ? "gone" : isDone(w) ? "done" : "open");
 
 export const AC_FIELD = "Microsoft.VSTS.Common.AcceptanceCriteria";
 
@@ -72,7 +84,7 @@ export const CHECKS: CheckInfo[] = [
   { id: "noPortfolioParent", title: "Portfolio item, no parent", about: "Portfolio items (below the top level) without a parent.", severity: "low", fix: "parent" },
   { id: "noDescription", title: "No description", about: "Open backlog and portfolio items with an empty description.", severity: "low", fix: "open" },
   { id: "noAcceptance", title: "No acceptance criteria", about: "Open backlog items with empty acceptance criteria.", severity: "low", fix: "open" },
-  { id: "canClose", title: "Could be closed", about: "Open items whose children are all done (not shown while a linked child is not loaded).", severity: "low", fix: "close" },
+  { id: "canClose", title: "Could be closed", about: "Open items whose children are all done, also those in other teams' areas (an item shows once its links are read; a child that cannot be read counts as open).", severity: "low", fix: "close" },
 ];
 
 export const CHECK_BY_ID: Record<CheckId, CheckInfo> = Object.fromEntries(CHECKS.map((c) => [c.id, c])) as Record<CheckId, CheckInfo>;
@@ -104,6 +116,35 @@ export function pastIterationPaths(iterations: Iteration[], today: number): Set<
 
 const plural = (n: number, w: string): string => `${n} ${w}${n === 1 ? "" : "s"}`;
 
+/** Child ids from an item's links (empty when its links are not read). */
+export function linkedChildren(it: WorkItem): number[] {
+  return [...new Set((it.relations ?? []).filter((r) => r.rel === REL.child).map(relId).filter((id) => id > 0))];
+}
+
+/**
+ * Open items whose loaded children are all done: "Could be closed" when their links show no other open child.
+ * The page reads their links (and the children that are not loaded) before they are listed.
+ */
+export function closeCandidates(items: Iterable<WorkItem>): WorkItem[] {
+  const list = [...items];
+  const kids = new Map<number, WorkItem[]>();
+  for (const it of list) if (it.parent) kids.set(it.parent, [...(kids.get(it.parent) ?? []), it]);
+  return list.filter((it) => {
+    const children = kids.get(it.id) ?? [];
+    return isOpen(it) && !isDone(it) && children.length > 0 && children.every(isDone);
+  });
+}
+
+/**
+ * Can this item be closed now: every linked child (read just before) is done or removed, and at least one is done.
+ * A child missing from `kids` could not be read and counts as open.
+ */
+export function closableNow(it: WorkItem, kids: Map<number, WorkItem>): boolean {
+  if (!isOpen(it) || isDone(it) || !it.relations) return false;
+  const states = linkedChildren(it).map((id) => childState(kids.get(id)));
+  return states.includes("done") && !states.includes("open");
+}
+
 export function runChecks(input: HealthInput): Finding[] {
   const { process: p, today } = input;
   const items = [...input.items];
@@ -117,7 +158,7 @@ export function runChecks(input: HealthInput): Finding[] {
   }
   const topRank = Math.min(...p.levels.map((l) => l.rank));
   const past = pastIterationPaths(input.iterations, today);
-  const todayDay = new Date(today).toISOString().slice(0, 10);
+  const todayDay = todayKey(new Date(today));
   const out: Finding[] = [];
   const add = (checkId: CheckId, it: WorkItem, message: string): void => {
     out.push({ checkId, itemId: it.id, message, severity: CHECK_BY_ID[checkId].severity });
@@ -154,10 +195,10 @@ export function runChecks(input: HealthInput): Finding[] {
       const openKids = children.filter((c) => !isDone(c) && isOpen(c));
       if (openKids.length) add("doneWithOpenChildren", it, `${it.state}, but ${plural(openKids.length, "child item")} still open.`);
     }
-    // a child link to an item that is not loaded (other area, closed long ago) may be open: do not suggest
-    const childNotLoaded = (it.relations ?? []).some((r) => r.rel === REL.child && relId(r) > 0 && !byId.has(relId(r)));
-    if (open && !isDone(it) && children.length && children.every(isDone) && !childNotLoaded) {
-      add("canClose", it, `All ${plural(children.length, "child item")} are done.`);
+    // only once its links are read: a child that is not loaded (another team's area, closed long ago) may be open
+    if (open && !isDone(it) && children.length && children.every(isDone) && it.relations) {
+      const states = linkedChildren(it).filter((id) => !byId.has(id)).map((id) => input.outside?.get(id) ?? "open");
+      if (!states.includes("open")) add("canClose", it, `All ${plural(children.length + states.filter((s) => s === "done").length, "child item")} are done.`);
     }
     if (it.category === "Proposed" && open) {
       const started = children.filter((c) => c.category === "InProgress");
@@ -166,9 +207,10 @@ export function runChecks(input: HealthInput): Finding[] {
     if (level.kind === "task" && (it.remaining ?? 0) > 0 && parent && isDone(parent)) {
       add("remainingOnDone", it, `${it.remaining} remaining, but #${parent.id} is ${parent.state}.`);
     }
-    const target = it.targetDate ?? it.dueDate;
-    if (open && !isDone(it) && target && target.slice(0, 10) < todayDay) {
-      add("pastTarget", it, `Target date ${target.slice(0, 10)} has passed.`);
+    // a planning date is a day without a time (saved as local midnight): read it as that day
+    const target = planKey(it.targetDate ?? it.dueDate);
+    if (open && !isDone(it) && target && target < todayDay) {
+      add("pastTarget", it, `Target date ${target} has passed.`);
     }
   }
   const order: string[] = CHECKS.map((c) => c.id);
