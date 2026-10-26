@@ -76,3 +76,11 @@ export function cleanTeams(raw: unknown, current: TeamRef, max = 12): TeamRef[] 
   }
   return out;
 }
+
+/**
+ * Which drags a bar offers, from the planning date fields its type has: the whole bar needs both dates,
+ * an end needs its own date. A type with neither cannot be dragged.
+ */
+export function dragsFor(fields: { start: boolean; target: boolean }): { move: boolean; start: boolean; end: boolean } {
+  return { move: fields.start && fields.target, start: fields.start, end: fields.target };
+}

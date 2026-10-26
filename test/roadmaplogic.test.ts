@@ -3,7 +3,14 @@ import assert from "node:assert/strict";
 import { REL } from "../src/api/api.ts";
 import type { WorkItem } from "../src/api/types.ts";
 import { pool } from "../src/core/teamplans.ts";
-import { cleanTeams, conflictCounts, dependencies, dependencyPairs } from "../src/views/roadmaplogic.ts";
+import { cleanTeams, conflictCounts, dependencies, dependencyPairs, dragsFor } from "../src/views/roadmaplogic.ts";
+
+test("roadmap drags only the dates the type has", () => {
+  assert.deepEqual(dragsFor({ start: true, target: true }), { move: true, start: true, end: true });
+  assert.deepEqual(dragsFor({ start: false, target: true }), { move: false, start: false, end: true });
+  assert.deepEqual(dragsFor({ start: true, target: false }), { move: false, start: true, end: false });
+  assert.deepEqual(dragsFor({ start: false, target: false }), { move: false, start: false, end: false });
+});
 
 const link = (rel: string, id: number) => ({ rel, url: `https://dev.azure.com/o/_apis/wit/workItems/${id}`, attributes: {} });
 const w = (id: number, relations: ReturnType<typeof link>[]): WorkItem => ({
