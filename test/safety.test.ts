@@ -62,7 +62,7 @@ test("a new item's sprint list keeps a given sprint that has ended", () => {
   assert.equal(sprintChoices("P", iters, "P").length, 3, "the backlog once");
 });
 
-test("a read that gets no answer is given up after the time limit; a write is not cut off", async () => {
+test("a read that gets no answer is given up after the time limit; a write only after its longer one", async () => {
   const real = globalThis.fetch;
   let seen: AbortSignal | undefined;
   globalThis.fetch = ((_url: string, init: RequestInit) => new Promise((_ok, fail) => {
@@ -74,9 +74,11 @@ test("a read that gets no answer is given up after the time limit; a write is no
     api.timeoutMs = 20;
     await assert.rejects(api.req("GET", "https://dev.azure.com/o/_apis/projects"), /did not answer within/);
     await assert.rejects(api.req("POST", "https://dev.azure.com/o/p/_apis/wit/wiql?api-version=7.1", { query: "x" }), /did not answer within/);
-    void api.req("PATCH", "https://dev.azure.com/o/p/_apis/wit/workitems/1", []).catch(() => {});
-    await new Promise((r) => setTimeout(r, 5));
-    assert.equal(seen, undefined, "a write has no time limit: it may have happened");
+    api.writeTimeoutMs = 60;
+    const write = api.req("PATCH", "https://dev.azure.com/o/p/_apis/wit/workitems/1", []);
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(seen?.aborted, false, "a write waits longer than a read");
+    await assert.rejects(write, /may or may not be saved/);
   } finally {
     globalThis.fetch = real;
   }

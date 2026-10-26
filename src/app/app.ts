@@ -447,6 +447,14 @@ export async function startApp(api: Api, host: HostContext | null, project: stri
 
   settings.onChange(() => current?.handle?.update?.(new Set(), "settings"));
 
+  // the team's items hit the most one query of Azure DevOps sends: the page shows only part of them; said once
+  let cutShown = false;
+  api.onQueryCut = () => {
+    if (ws.loadedAt || cutShown) return;
+    cutShown = true;
+    toast("Showing the first 20,000 items; choose a smaller team.", { kind: "error", action: { label: "Choose a team", run: () => pickTeam(teamBtn) } });
+  };
+
   void style.load();
   void route();
   // the Scheduler: while this page is open it makes the team's stories that are due (see app/scheduler.ts)

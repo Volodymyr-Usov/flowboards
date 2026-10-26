@@ -15,6 +15,9 @@ export interface ApiContext {
 
 export interface ExtensionDoc { id: string; __etag?: number; [k: string]: unknown }
 
+/** Ids a query found; `truncated` when Azure DevOps sent as many as it sends at most (more may exist). */
+export type QueryIds = number[] & { truncated?: boolean };
+
 export interface Api {
   ctx: ApiContext;
 
@@ -36,7 +39,9 @@ export interface Api {
     body: { activities: { name: string; capacityPerDay: number }[]; daysOff: { start: string; end: string }[] }): Promise<void>;
 
   // work items
-  query(project: string, spec: QuerySpec): Promise<number[]>;
+  query(project: string, spec: QuerySpec): Promise<QueryIds>;
+  /** heard when a query without its own `top` came back cut at the limit of Azure DevOps */
+  onQueryCut?: ((spec: QuerySpec) => void) | undefined;
   /** fields: extra reference names to read besides the standard ones */
   items(project: string, ids: number[], opts?: { fields?: string[]; relations?: boolean }): Promise<WorkItem[]>;
   /** one item read in full (with links); project "" reads it from whatever project it is in */

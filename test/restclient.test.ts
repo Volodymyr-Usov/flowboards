@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Gate, iterPath, RestApi, serviceUrl } from "../src/api/rest.ts";
+import { Gate, iterPath, ownsUrl, RestApi, serviceUrl } from "../src/api/rest.ts";
 
 type Call = { method: string; url: string; body?: string };
 function withFetch(answer: (c: Call, n: number) => Response | Promise<Response>): { calls: Call[]; restore: () => void } {
@@ -204,4 +204,119 @@ test("service addresses of the same organization", () => {
   assert.equal(serviceUrl("https://dev.azure.com/contoso/", "extmgmt"), "https://extmgmt.dev.azure.com/contoso/");
   assert.equal(serviceUrl("https://contoso.visualstudio.com/", "vssps"), "https://contoso.vssps.visualstudio.com/");
   assert.equal(serviceUrl("https://tfs.example.com/tfs/Coll/", "vssps"), "https://tfs.example.com/tfs/Coll/");
+});
+
+test("the token goes only to the organization's own addresses", () => {
+  const dev = "https://dev.azure.com/contoso/";
+  assert.equal(ownsUrl(dev, "https://dev.azure.com/contoso/_apis/projects"), true);
+  assert.equal(ownsUrl(dev, "https://dev.azure.com/Contoso/P/_apis/wit/wiql"), true, "the organization's name in any case");
+  assert.equal(ownsUrl(dev, "https://vssps.dev.azure.com/contoso/_apis/graph"), true);
+  assert.equal(ownsUrl(dev, "https://extmgmt.dev.azure.com/contoso/_apis/ExtensionManagement"), true);
+  assert.equal(ownsUrl(dev, "https://dev.azure.com/fabrikam/_apis/projects"), false, "another organization");
+  assert.equal(ownsUrl(dev, "https://dev.azure.com/contosoX/_apis/projects"), false);
+  assert.equal(ownsUrl(dev, "https://evil.example/contoso/_apis"), false);
+  assert.equal(ownsUrl(dev, "https://dev.azure.com.evil.example/contoso/"), false);
+  assert.equal(ownsUrl(dev, "http://dev.azure.com/contoso/"), false, "not without https");
+  assert.equal(ownsUrl(dev, "https://user:pw@dev.azure.com/contoso/"), false);
+  assert.equal(ownsUrl(dev, "https://x.y.dev.azure.com/contoso/"), false);
+  assert.equal(ownsUrl(dev, "not a url"), false);
+  const old = "https://contoso.visualstudio.com/";
+  assert.equal(ownsUrl(old, "https://contoso.visualstudio.com/_apis/x"), true);
+  assert.equal(ownsUrl(old, "https://contoso.vssps.visualstudio.com/_apis/x"), true);
+  assert.equal(ownsUrl(old, "https://fabrikam.visualstudio.com/_apis/x"), false);
+  assert.equal(ownsUrl(old, "https://contoso.visualstudio.com.evil.example/"), false);
+  assert.equal(ownsUrl(old, "https://contosox.vssps.visualstudio.com/"), false);
+  const server = "https://tfs.example.com/tfs/Coll/";
+  assert.equal(ownsUrl(server, "https://tfs.example.com/tfs/Coll/_apis/x"), true);
+  assert.equal(ownsUrl(server, "https://cdn.example.com/a.png"), false);
+});
+
+test("a picture link to another address is read without the token", async () => {
+  const g = globalThis as unknown as { fetch: typeof fetch };
+  const old = g.fetch;
+  const seen: { url: string; auth: boolean }[] = [];
+  g.fetch = (async (url: string, init: { headers: Record<string, string> }) => {
+    seen.push({ url, auth: "Authorization" in init.headers });
+    return new Response(JSON.stringify({ imageData: "AAAA" }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as unknown as typeof fetch;
+  try {
+    const api = new RestApi(ctx, async () => "t");
+    assert.equal(await api.avatar({ displayName: "X", uniqueName: "x", imageUrl: "https://pictures.example/x.png" }), "data:image/png;base64,AAAA");
+    await api.req("GET", "https://dev.azure.com/o/_apis/projects?api-version=7.1");
+    assert.deepEqual(seen, [{ url: "https://pictures.example/x.png", auth: false }, { url: "https://dev.azure.com/o/_apis/projects?api-version=7.1", auth: true }]);
+  } finally { g.fetch = old; }
+});
+
+test("a write that gets no answer is given up after its own limit, and says it may be saved", async () => {
+  const g = globalThis as unknown as { fetch: typeof fetch };
+  const old = g.fetch;
+  let calls = 0;
+  g.fetch = ((_url: string, init: { signal: AbortSignal }) => new Promise((_res, rej) => {
+    calls++;
+    init.signal.addEventListener("abort", () => rej(new Error("aborted")));
+  })) as unknown as typeof fetch;
+  try {
+    const api = new RestApi(ctx, async () => "t");
+    api.writeTimeoutMs = 30;
+    await assert.rejects(api.update("P", 1, [{ op: "add", path: "/fields/System.Title", value: "x" }]), /did not answer; the change may or may not be saved\. Reload to check\./);
+    assert.equal(calls, 1, "a write is not repeated");
+  } finally { g.fetch = old; }
+});
+
+test("a long list of ids is queried in parts of 1,000 and joined", async () => {
+  const f = withFetch((c) => {
+    const q = JSON.parse(c.body!).query as string;
+    const ids = (/\[System\.Id\] IN \(([^)]*)\)/.exec(q)?.[1] ?? "").split(", ").map(Number).filter((n) => n % 2 === 0);
+    return json({ workItems: ids.reverse().map((id) => ({ id })) });
+  });
+  try {
+    const api = new RestApi(ctx, async () => "t");
+    const ids = Array.from({ length: 2500 }, (_, i) => i + 1);
+    const got = await api.query("P", { ids, changedAfter: "2026-01-01" });
+    assert.equal(f.calls.length, 3);
+    assert.equal(got.length, 1250);
+    assert.deepEqual(got.slice(0, 3), [2, 4, 6], "in id order again");
+    assert.equal(got.truncated, undefined);
+    assert.ok(f.calls.every((c) => (JSON.parse(c.body!).query as string).split(",").length <= 1000));
+  } finally { f.restore(); }
+});
+
+test("a query that comes back at the limit of Azure DevOps is marked cut, and the app hears of it", async () => {
+  const f = withFetch((c) => {
+    const top = Number(/\$top=(\d+)/.exec(c.url)![1]);
+    return json({ workItems: Array.from({ length: Math.min(top, 20000) }, (_, i) => ({ id: i + 1 })) });
+  });
+  try {
+    const api = new RestApi(ctx, async () => "t");
+    const heard: unknown[] = [];
+    api.onQueryCut = (spec) => heard.push(spec);
+    const all = await api.query("P", { types: ["Task"] });
+    assert.equal(all.length, 20000);
+    assert.equal(all.truncated, true);
+    assert.equal(heard.length, 1);
+    // a limit the caller chose is not the cap: marked, but not told
+    const few = await api.query("P", { types: ["Task"], top: 10 });
+    assert.equal(few.truncated, true);
+    assert.equal(heard.length, 1);
+  } finally { f.restore(); }
+});
+
+test("comments: every page up to 1,000, and a Markdown comment as its rendered HTML", async () => {
+  let page = 0;
+  const f = withFetch(() => {
+    page++;
+    const comments = Array.from({ length: 200 }, (_, i) => ({ id: page * 1000 + i, text: "**hi**", format: i === 0 ? "markdown" : "html", renderedText: "<p><strong>hi</strong></p>", createdDate: "2026-01-01T00:00:00Z" }));
+    return json({ comments, continuationToken: page < 9 ? `c${page}` : undefined });
+  });
+  try {
+    const api = new RestApi(ctx, async () => "t");
+    const cs = await api.comments("P", 1);
+    assert.equal(cs.length, 1000);
+    assert.equal(f.calls.length, 5, "stops at 1,000");
+    assert.match(f.calls[0].url, /\$expand=renderedText/);
+    assert.doesNotMatch(f.calls[0].url, /continuationToken/);
+    assert.match(f.calls[1].url, /continuationToken=c1&/);
+    assert.equal(cs[0].text, "<p><strong>hi</strong></p>");
+    assert.equal(cs[1].text, "**hi**", "an HTML comment keeps its text");
+  } finally { f.restore(); }
 });
