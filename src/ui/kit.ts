@@ -45,17 +45,19 @@ export function toast(message: Child, opts: { kind?: "info" | "ok" | "error"; un
       try { await undo(); toast("Undone", { kind: "ok", timeout: 2500 }); } catch (err) { toast("Undo failed: " + errorText(err), { kind: "error" }); }
     },
   }, icon("undo", 14), "Undo") as HTMLButtonElement : null;
-  const el = h(`div.toast.${kind}`, null,
+  // an error is said at once by screen readers; other messages wait for a pause
+  const el = h(`div.toast.${kind}`, kind === "error" ? { role: "alert", "aria-live": "assertive" } : null,
     h("div.msg", null, message),
     opts.action ? h("button.btn.link", { onclick: () => { close(); opts.action!.run(); } }, opts.action.label) : null,
     undoBtn,
     h("button.icon-btn", { title: "Close", "aria-label": "Close", onclick: close }, icon("close", 14)));
-  // a success closes the error messages it answers
-  if (kind === "ok") for (const old of toastHost.querySelectorAll<HTMLElement>(".toast.error:not(.gone)")) old.querySelector<HTMLButtonElement>(".icon-btn")?.click();
+  // a success never closes an error: the error may be about something else, and it stays until read or closed
   toastHost.append(el);
-  // only the newest few stay: older ones go first
+  // only the newest few stay: older ones go first, other messages before errors
   const live = [...toastHost.querySelectorAll<HTMLElement>(".toast:not(.gone)")];
-  for (const old of live.slice(0, Math.max(0, live.length - MAX_TOASTS))) old.querySelector<HTMLButtonElement>(".icon-btn")?.click();
+  const extra = Math.max(0, live.length - MAX_TOASTS);
+  const order = [...live.filter((t) => t !== el && !t.classList.contains("error")), ...live.filter((t) => t !== el && t.classList.contains("error"))];
+  for (const old of order.slice(0, extra)) old.querySelector<HTMLButtonElement>(".icon-btn")?.click();
   if (undoBtn) lastUndo = { run: () => undoBtn.click(), el };
   // the message waits while the mouse or the keyboard is on it
   const ms = opts.timeout ?? (kind === "error" ? 12000 : opts.undo ? 9000 : 4000);
@@ -176,10 +178,17 @@ let openPopup: { el: HTMLElement; close: () => void } | null = null;
 
 export function closePopup(): void { openPopup?.close(); }
 
-/** A popup next to an anchor; closes on Esc, a click outside or scroll. */
-export function popup(anchor: Element, content: HTMLElement, opts: { align?: "left" | "right"; className?: string; onClose?: () => void } = {}): () => void {
+/** A popup's name for screen readers: the one given, else what its anchor says about itself. */
+export function popupName(anchor: Element, label?: string): string {
+  const tidy = (s: string | null | undefined): string => (s ?? "").replace(/\s+/g, " ").trim();
+  return tidy(label) || tidy(anchor.getAttribute("aria-label")) || tidy(anchor.getAttribute("title")) || tidy(anchor.textContent).slice(0, 80);
+}
+
+/** A popup next to an anchor; closes on Esc, a click outside, Tab out of it, or a resize. */
+export function popup(anchor: Element, content: HTMLElement, opts: { align?: "left" | "right"; className?: string; onClose?: () => void; label?: string } = {}): () => void {
   closePopup();
-  const el = h(`div.popup${opts.className ? "." + opts.className : ""}`, { role: "dialog" }, content);
+  const name = popupName(anchor, opts.label);
+  const el = h(`div.popup${opts.className ? "." + opts.className : ""}`, { role: "dialog", "aria-label": name || undefined }, content);
   document.body.append(el);
   const r = anchor.getBoundingClientRect();
   const w = el.offsetWidth;
@@ -194,7 +203,11 @@ export function popup(anchor: Element, content: HTMLElement, opts: { align?: "le
   // pressing what opened the popup again closes it (instead of opening it afresh)
   const onAnchor = (e: Event): void => { if (anchor.contains(e.target as Node)) { e.preventDefault(); e.stopImmediatePropagation(); close(); } };
   // Escape closes only the popup, not a dialog or panel below it
-  const onKey = (e: KeyboardEvent): void => { if (e.key === "Escape") { e.stopImmediatePropagation(); close(); (anchor as HTMLElement).focus?.(); } };
+  const onKey = (e: KeyboardEvent): void => {
+    if (e.key === "Escape") { e.stopImmediatePropagation(); close(); (anchor as HTMLElement).focus?.(); return; }
+    // Tab past its first or last control leaves the popup: it closes, so it is not left open behind the focus
+    if (e.key === "Tab" && el.contains(document.activeElement)) setTimeout(() => { if (!closed && !el.contains(document.activeElement)) close(); });
+  };
   let closed = false;
   const close = (): void => {
     // the listeners go in every case (also when the popup left the page another way)
@@ -348,15 +361,38 @@ export function select<T extends string>(options: { value: T; label: string }[],
     options.map((o) => h("option", { value: o.value, selected: o.value === value }, o.label)));
 }
 
-export function segmented<T extends string>(options: { value: T; label: string; title?: string }[], value: T, onChange: (v: T) => void): HTMLElement {
-  const el = h("div.segmented", { role: "radiogroup" });
-  for (const o of options) {
-    el.append(h("button", {
-      role: "radio", "aria-checked": String(o.value === value), title: o.title,
-      onclick: () => { for (const b of el.children) b.setAttribute("aria-checked", "false"); el.querySelector(`[data-v="${o.value}"]`)?.setAttribute("aria-checked", "true"); onChange(o.value); },
+/** Choices side by side, one on (a radio group: one Tab stop, the arrow keys move the choice). */
+export function segmented<T extends string>(options: { value: T; label: string; title?: string }[], value: T, onChange: (v: T) => void, props: { "aria-label"?: string } = {}): HTMLElement {
+  const el = h("div.segmented", { role: "radiogroup", ...props });
+  const buttons: HTMLButtonElement[] = [];
+  const choose = (i: number): void => {
+    buttons.forEach((b, k) => { b.setAttribute("aria-checked", String(k === i)); b.tabIndex = k === i ? 0 : -1; });
+    onChange(options[i].value);
+  };
+  options.forEach((o, i) => {
+    const b = h("button", {
+      type: "button", role: "radio", "aria-checked": String(o.value === value), title: o.title, tabindex: o.value === value ? 0 : -1,
+      onclick: () => choose(i),
       dataset: { v: o.value },
-    }, o.label));
-  }
+    }, o.label) as HTMLButtonElement;
+    buttons.push(b);
+    el.append(b);
+  });
+  // nothing chosen yet: the first choice takes the Tab stop
+  if (!options.some((o) => o.value === value) && buttons[0]) buttons[0].tabIndex = 0;
+  el.addEventListener("keydown", (e) => {
+    const i = buttons.indexOf(document.activeElement as HTMLButtonElement);
+    if (i < 0) return;
+    const n = buttons.length;
+    const to = e.key === "ArrowRight" || e.key === "ArrowDown" ? (i + 1) % n : e.key === "ArrowLeft" || e.key === "ArrowUp" ? (i - 1 + n) % n : e.key === "Home" ? 0 : e.key === "End" ? n - 1 : -1;
+    if (to < 0) return;
+    e.preventDefault();
+    buttons[to].focus();
+    const parent = el.parentElement;
+    choose(to);
+    // a page that draws the choices again on a change: the focus goes to the same choice in the new copy
+    if (!buttons[to].isConnected) parent?.querySelector<HTMLElement>(`.segmented [data-v="${CSS.escape(options[to].value)}"]`)?.focus();
+  });
   return el;
 }
 

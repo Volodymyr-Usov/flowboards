@@ -262,7 +262,7 @@ function tagsAudit(app: App, pane: HTMLElement, query: () => string): { start():
       h("th.num", { title: "Every work item with this tag in the project (counted when you ask)" }, "Project items"),
       h("th", null, ""))),
     h("tbody", null, rows.map((t) => h("tr", null,
-      h("td", null, tagChip(t.name, `${t.name}: click to change its colour`)),
+      h("td", null, tagChip(t.name, `${t.name}: click to change its colour`, { tab: true })),
       h("td.num", null, String(counts.get(lower(t.name)) ?? 0)),
       h("td.num", null, projectCell(t)),
       h("td", null, actions(t, mergeTargets(t))))))), "au-tags");
