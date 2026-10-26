@@ -1,5 +1,11 @@
 /* Colors and type. Light and dark follow Azure DevOps' theme (or the person's choice in the top bar).
-   Views use these tokens only, never raw colors, so both themes stay right. */
+   Views use these tokens only, never raw colors, so both themes stay right.
+   Colors used for text are at least 4.5:1 (WCAG AA) on the page, the panel and the cards (contrast ratios):
+     light  --faint #667084: 4.98 on --panel, 4.69 on --card, 4.56 on --bg   (was #8a93a5: 3.09 / 2.83 on --bg)
+            --warn  #8f6a00: 4.97 on --panel, 4.67 on --card, 4.55 on --bg   (was #b98a00: 3.14)
+            --ok    #297d50: 5.07 on --panel, 4.64 on --bg; white on it 5.07  (was #2f8f5b: 4.04)
+     dark   --faint #8792a7: 5.39 on --panel, 4.59 on --card, 5.94 on --bg   (was #6f7a90: 3.91 on --panel)
+   The soft backgrounds (--warn-soft, --ok-soft) keep the old hues, so the tints look the same. */
 :root {
   --font: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
   --font-head: "Segoe UI Semibold", "Segoe UI", system-ui, sans-serif;
@@ -7,12 +13,12 @@
   --radius: 8px;
   --bar-h: 48px;
 
-  --bg: #f3f5f8; --panel: #ffffff; --panel-2: #f7f8fa; --card: #f7f8fa; --ink: #18202e; --muted: #5b6578; --faint: #8a93a5;
+  --bg: #f3f5f8; --panel: #ffffff; --panel-2: #f7f8fa; --card: #f7f8fa; --ink: #18202e; --muted: #5b6578; --faint: #667084;
   --line: #d9dee7; --soft: #eaeef4; --hover: rgb(24 32 46 / .05);
   --accent: #1d6fb8; --accent-ink: #ffffff; --accent-soft: rgb(29 111 184 / .1);
   --key-top: #2f6db5; --key-bot: #173f78; --key-edge: #0f2d5a;
   --hit: #e0a800;
-  --ok: #2f8f5b; --warn: #b98a00; --bad: #c8372d; --info: #1d6fb8;
+  --ok: #297d50; --warn: #8f6a00; --bad: #c8372d; --info: #1d6fb8;
   --ok-soft: rgb(47 143 91 / .12); --warn-soft: rgb(185 138 0 / .14); --bad-soft: rgb(200 55 45 / .12);
   --wire: #b4bfcf; --wire-hot: #1d6fb8; --drop: #1d6fb8;
   --feat: #e3edf9; --feat-line: #8fb0d8; --epic: #c8660f; --epic-soft: rgb(200 102 15 / .08);
@@ -22,7 +28,7 @@
   color-scheme: light;
 }
 :root[data-theme="dark"] {
-  --bg: #0f131a; --panel: #171d28; --panel-2: #1b2230; --card: #222a3a; --ink: #e7ebf3; --muted: #9ba5b9; --faint: #6f7a90;
+  --bg: #0f131a; --panel: #171d28; --panel-2: #1b2230; --card: #222a3a; --ink: #e7ebf3; --muted: #9ba5b9; --faint: #8792a7;
   --line: #2b3446; --soft: #202838; --hover: rgb(255 255 255 / .05);
   --accent: #5fa8f0; --accent-ink: #0f131a; --accent-soft: rgb(95 168 240 / .14);
   --key-top: #3d7bc4; --key-bot: #1f4c8c; --key-edge: #0a1d3c;

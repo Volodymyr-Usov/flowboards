@@ -3,6 +3,7 @@
 // A block is any element marked with `blk(id, el)`; a hidden one gets `data-off` (see 10-shell.css).
 // The view tabs are handled by the top bar itself (see `tabOff`): the open page's tab always stays.
 import { prefs } from "../core/settings.ts";
+import { toast } from "./kit.ts";
 
 export const BLOCKS_KEY = "blocks.off";
 
@@ -116,16 +117,42 @@ export function setCrossesHidden(hidden: boolean): void {
   document.body.classList.toggle("no-xs", hidden);
 }
 
+/** How long a mouse must have been on a block before a click on its corner hides it (the cross has shown by then). */
+export const CROSS_ARM_MS = 200;
+
+/** The block a mouse (or pen) is on, since when; a touch is never a hover. */
+export interface Hover { el: Element; since: number }
+
+/**
+ * Does a click on the corner of `el` hide it? Only when a mouse has been on that block for a moment: a tap on a
+ * touch screen (no hover, no cross shown) and a quick click that just arrives there use the control as usual.
+ */
+export const crossArmed = (hover: Hover | null, el: Element, now: number): boolean => hover != null && hover.el === el && now - hover.since >= CROSS_ARM_MS;
+
+/** The name of a block or tab, for the message after hiding it. */
+function blockLabel(id: string): string {
+  const all = [...BLOCK_GROUPS.flatMap((g) => g.blocks), ...tabBlocks];
+  const b = all.find((x) => x.id === id || `tab:${x.id}` === id);
+  return b?.label ?? id.replace(/^tab:/, "");
+}
+
 /**
  * The cross is drawn by CSS in the top right corner of a block (a tab: inside it); the click on that
- * corner hides the block instead of using it. Call once, at the start of the app.
+ * corner hides the block instead of using it, once a mouse has been on it (see crossArmed), with Undo
+ * in the message. Call once, at the start of the app.
  */
 export function installCrosses(): void {
   document.body.classList.toggle("no-xs", crossesHidden());
+  let hover: Hover | null = null;
+  document.addEventListener("pointerover", (e) => {
+    const el = e.pointerType === "touch" || !(e.target instanceof Element) ? null : e.target.closest("[data-blk], .tab");
+    if (!el) hover = null;
+    else if (hover?.el !== el) hover = { el, since: performance.now() };
+  }, true);
   document.addEventListener("click", (e) => {
     if (crossesHidden() || !(e.target instanceof Element)) return;
     const el = e.target.closest<HTMLElement>("[data-blk], .tab");
-    if (!el || el.matches(".tab.active")) return;
+    if (!el || el.matches(".tab.active") || !crossArmed(hover, el, performance.now())) return;
     const r = el.getBoundingClientRect();
     const tab = el.classList.contains("tab");
     // the zone of the drawn cross: inside the corner of a tab, centred on the corner of other blocks
@@ -137,6 +164,7 @@ export function installCrosses(): void {
     e.preventDefault();
     e.stopImmediatePropagation();
     setBlockShown(id, false);
+    toast(`Hidden: ${blockLabel(id)}. Settings > Menu & bars shows it again.`, { undo: async () => setBlockShown(id, true) });
   }, true);
 }
 

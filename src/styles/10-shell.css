@@ -37,7 +37,10 @@
 .demo-banner { background: var(--warn-soft); color: var(--ink); padding: 6px 16px; font-size: 12.5px; border-bottom: 1px solid var(--line); }
 .view-host { flex: 1; min-width: 0; }
 .view { padding: 14px 16px 32px; min-width: 0; }
-body.panel-open .view { margin-right: var(--panel-w, 0); }
+/* the page makes room for the details panel, so the panel never covers the end of the page bar: --panel-w is the
+   panel's width (it can be dragged wider), copied by src/ui/pagebar.ts; on a narrow screen the panel covers all */
+body.panel-open .view { margin-right: var(--panel-w, 520px); }
+@media (max-width: 700px) { body.panel-open .view { margin-right: 0; } }
 /* the page bar of every page (src/ui/pagebar.ts): one line: person chips, filter, the field, buttons and switches */
 .page-bar { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
 .page-bar { position: relative; }
@@ -115,7 +118,8 @@ table.data th.sortable[aria-sort="descending"]::after { content: " ▼"; font-si
 /* column widths set by dragging (ui/resizable.ts) */
 .col-grip { position: absolute; top: 0; right: -3px; bottom: 0; width: 7px; cursor: col-resize; z-index: 3; touch-action: none; }
 .col-grip::after { content: ""; position: absolute; top: 20%; bottom: 20%; left: 3px; width: 1px; background: var(--line); }
-.col-grip:hover::after, .col-grip.on::after { top: 0; bottom: 0; width: 2px; left: 2px; background: var(--accent); }
+.col-grip:hover::after, .col-grip.on::after, .col-grip:focus-visible::after { top: 0; bottom: 0; width: 2px; left: 2px; background: var(--accent); }
+.col-grip:focus-visible { outline: none; background: var(--accent-soft); }
 table.cols-sized td, table.cols-sized th { overflow: hidden; text-overflow: ellipsis; }
 table.data th:last-child .col-grip, .tree-table th:last-child .col-grip { right: 0; }
 /* groups: each group of choices (the sprint, hidden columns…) reads as one */
@@ -138,12 +142,16 @@ table.data th:last-child .col-grip, .tree-table th:last-child .col-grip { right:
 body:not(.no-xs) [data-blk]::after { content: "×"; position: absolute; top: -6px; right: -5px; width: 12px; height: 12px; display: grid; place-items: center; font: 600 11px/1 var(--font); color: var(--muted); opacity: 0; transition: opacity .12s; border-radius: 50%; z-index: 2; }
 body:not(.no-xs) .tab:not(.active)::after { content: "×"; position: absolute; top: 3px; right: 3px; width: 12px; height: 12px; display: grid; place-items: center; font: 600 11px/1 var(--font); color: var(--menu-muted); opacity: 0; transition: opacity .12s; }
 body:not(.no-xs) .topbar [data-blk]::after { color: var(--menu-muted); }
-/* the cross shows only while the pointer is on its control (or tab) */
-body:not(.no-xs) [data-blk]:hover::after, body:not(.no-xs) .tab:hover::after { opacity: .85; }
+/* the cross shows only while a mouse is on its control (or tab): a touch screen has no hover, so no cross (a tap never hides) */
+@media (hover: hover) { body:not(.no-xs) [data-blk]:hover::after, body:not(.no-xs) .tab:hover::after { opacity: .85; } }
 
 /* the page bar's order: People first, then Filter, then the Board's layout switch; the rest follows. What is last goes under ⋯ first. */
 .pb-2 [data-blk="people"], .pb-2 .pb-group:has(> [data-blk="people"]) { order: -4; }
 .pb-2 [data-blk="filters"], .pb-2 .pb-group:has(> [data-blk="filters"]) { order: -3; }
+/* "Filtered: 2 · Clear" (src/ui/pagebar.ts) right after the filters; it is no block: it cannot be hidden and never goes under ⋯ */
+.pb-2 .pb-filtered { order: -3; flex: none; white-space: nowrap; gap: 4px; padding: 1px 2px 1px 8px; border-color: var(--accent); color: var(--ink); }
+.pb-filtered .icon { color: var(--accent); }
+.pb-filtered .btn.link { padding: 0 6px; }
 .pb-2 [data-blk="layout"] { order: -2; }
 /* the first line: team, then style, then the menu titles */
 .top-lead { display: flex; align-items: center; gap: 6px; flex: none; }
