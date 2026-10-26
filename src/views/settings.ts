@@ -28,7 +28,7 @@ import { pageBar } from "../ui/pagebar.ts";
 import type { PillarDraft } from "./pillareditor.ts";
 import { checkPillars, pillarDraft, pillarEditor, savePillars } from "./pillareditor.ts";
 import type { EditCtx, Problem } from "./ruleeditor.ts";
-import { clearInvalid, clone, markInvalid, moveIn, newId, ruleCard, ruleProblem, svgArrow } from "./ruleeditor.ts";
+import { clearInvalid, clone, markInvalid, moveIn, newId, ruleCard, levelHasAcceptance, ruleProblem, svgArrow } from "./ruleeditor.ts";
 
 type Tab = "menu" | "cards" | "columns" | "team" | "priority" | "rules" | "checklists" | "tasks" | "board" | "strategy" | "ai" | "mine";
 
@@ -288,7 +288,7 @@ export const settingsView: View = {
               h("button.btn", {
                 title: "Add a sensible starting set for this process (nothing is on until you save)", disabled: app.actions.readOnly, "data-fk": "rules:suggest",
                 onclick: () => {
-                  const add = suggestedRules(orderedStates(ws.process, reqTypes))
+                  const add = suggestedRules(orderedStates(ws.process, reqTypes), { acceptance: levelHasAcceptance(ws, "requirement") })
                     .filter((s) => !rules.some((r) => r.level === s.level && r.target === s.target))
                     .map((s) => ({ ...s, id: rules.some((r) => r.id === s.id) ? newId("r") : s.id }));
                   if (!add.length) { toast("The suggested rules are already in the list"); return; }
