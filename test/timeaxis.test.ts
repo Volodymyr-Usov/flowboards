@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   addMonths, clip, dayIso, dayKey, dragSpan, dragDays, fromYmd, localDay, monthGrid, monthKey, monthStart, packLanes,
-  parseMonthKey, parts, planDay, quarterStart, ticks, union, weekday, weekStart,
+  parseMonthKey, parts, planDay, planIso, planKey, quarterStart, ticks, todayKey, union, weekday, weekStart,
 } from "../src/views/timeaxis.ts";
 
 test("planDay rounds a planning date to the day the person picked", () => {
@@ -91,4 +91,18 @@ test("dragging snaps to days and keeps at least one day", () => {
   assert.deepEqual(dragSpan(s, "start", 15), { start: 20, end: 20 });
   assert.deepEqual(dragSpan(s, "end", -30), { start: 10, end: 10 });
   assert.deepEqual(dragSpan(s, "end", 4), { start: 10, end: 24 });
+});
+
+test("planIso writes local midnight, and planDay and planKey read back the same day in any zone", () => {
+  for (const d of [fromYmd(2026, 0, 5), fromYmd(2026, 2, 29), fromYmd(2026, 9, 25), fromYmd(2026, 11, 31)]) {
+    const iso = planIso(d);
+    const back = new Date(iso);
+    assert.equal(back.getHours(), 0);
+    assert.equal(back.getDate(), parts(d).d);
+    assert.equal(planDay(iso), d);
+    assert.equal(planKey(iso), dayKey(d));
+  }
+  assert.equal(planKey(undefined), "");
+  assert.equal(planKey("2026-10-20T22:00:00Z"), "2026-10-21"); // Berlin midnight
+  assert.equal(todayKey(new Date(2026, 9, 25, 23, 30)), "2026-10-25");
 });
