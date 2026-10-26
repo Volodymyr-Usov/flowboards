@@ -1,8 +1,8 @@
 // Checklists on work items ("definition of done"): a short list of things to tick. Kept in the
-// extension's shared storage, one document per work item in a collection per project, not in the
+// extension's shared storage, one document per work item in a collection per project (by its id), not in the
 // work item's fields. The team's default list per work item type is in the shared settings.
 import type { Api } from "../api/api.ts";
-import { storageName, TeamStore } from "./teamstore.ts";
+import { projectCollectionName, TeamStore } from "./teamstore.ts";
 
 export interface CheckItem {
   id: string;
@@ -68,7 +68,7 @@ export class Checklists {
   private cache = new Map<number, CheckItem[]>();
 
   constructor(api: Api, project: string) {
-    this.store = new TeamStore<ChecklistDoc>(api, storageName(["checklist", project]));
+    this.store = new TeamStore<ChecklistDoc>(api, projectCollectionName("checklist", project));
   }
 
   /** The last checklist read for this item, if any was read yet. */

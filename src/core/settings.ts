@@ -8,10 +8,11 @@ import type { Person } from "../api/types.ts";
 import type { UrgencyWeights } from "./urgency.ts";
 import { cleanUrgency, DEFAULT_URGENCY } from "./urgency.ts";
 import type { Rule } from "./rules.ts";
+import { REQUIREMENTS } from "./rules.ts";
 import type { ChildTemplate } from "./templates.ts";
 import type { WorkStyle } from "./workstyle.ts";
 import type { CustomCheck } from "./health.ts";
-import { legacyName, storageName } from "./teamstore.ts";
+import { every, knownProjectId, legacyName, storageName } from "./teamstore.ts";
 
 export interface Pillar { id: string; name: string; description?: string; color?: string }
 
@@ -73,6 +74,46 @@ export function settingsDocIds(project: string): { id: string; legacy: string } 
 }
 
 /**
+ * The id of a project's shared settings document, and the older ids it is copied from once: by the
+ * project's id when it is known (a renamed project keeps its settings), else by its name.
+ */
+export function sharedDocIds(project: string, projectId?: string): { id: string; older: string[] } {
+  const { id, legacy } = settingsDocIds(project);
+  const older = [...new Set([id, legacy])];
+  if (!projectId) return { id, older: older.slice(1) };
+  return { id: "project-id-" + storageName([projectId.replace(/-/g, "").toLowerCase()], 89), older };
+}
+
+const LEVELS: Rule["level"][] = ["portfolio", "requirement", "task", "*"];
+const KNOWN_REQUIREMENTS = new Set<string>(REQUIREMENTS.map((r) => r.id));
+
+/**
+ * A stored rule made safe to use, or null when it cannot be: one with no column or state, or no level,
+ * is left out; lists that are not lists of text become lists of the texts in them, and a requirement
+ * this version does not know is left out (it could never be met).
+ */
+export function cleanRule(v: unknown, index = 0): Rule | null {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  const r = v as Record<string, unknown>;
+  const target = typeof r.target === "string" ? r.target.trim() : "";
+  const level = LEVELS.find((l) => l === r.level);
+  if (!target || !level) return null;
+  const texts = (x: unknown): string[] => (Array.isArray(x) ? x.filter((s): s is string => typeof s === "string" && s.trim() !== "") : []);
+  const out: Record<string, unknown> = {
+    ...r,
+    id: typeof r.id === "string" && r.id ? r.id : `rule-${index + 1}`,
+    level, target,
+    requires: texts(r.requires).filter((q) => KNOWN_REQUIREMENTS.has(q)),
+    onlyBy: texts(r.onlyBy),
+  };
+  if ("fields" in r) out.fields = texts(r.fields);
+  if ("from" in r) { if (typeof r.from === "string" && r.from.trim()) out.from = r.from; else delete out.from; }
+  if ("note" in r && typeof r.note !== "string") delete out.note;
+  if ("breaks" in r && typeof r.breaks !== "boolean") delete out.breaks;
+  return out as unknown as Rule;
+}
+
+/**
  * The shared settings as read: a part that is missing or damaged (another version wrote it, or it was
  * edited by hand) takes its default, so the pages can rely on lists being lists and days being numbers.
  */
@@ -83,7 +124,7 @@ export function cleanShared(doc: Partial<SharedSettings> | null | undefined, id:
   const days = (v: unknown, fallback: number): number => (typeof v === "number" && Number.isFinite(v) && v >= 1 ? Math.min(365, Math.round(v)) : fallback);
   return {
     ...DEFAULT_SHARED, ...d,
-    rules: list(d.rules).filter((r) => r && typeof r === "object") as SharedSettings["rules"],
+    rules: list(d.rules).map((r, i) => cleanRule(r, i)).filter((r): r is Rule => r !== null),
     pillars: list(d.pillars).filter((p) => p && typeof p === "object") as SharedSettings["pillars"],
     pillarTagPrefix: typeof d.pillarTagPrefix === "string" ? d.pillarTagPrefix : DEFAULT_SHARED.pillarTagPrefix,
     epicPillars: map(d.epicPillars) as SharedSettings["epicPillars"],
@@ -104,10 +145,17 @@ export function cleanShared(doc: Partial<SharedSettings> | null | undefined, id:
   };
 }
 
+/** Did a part a change sets differ between the copy the change was made on and a newer one? */
+export function changedParts(base: SharedSettings, newer: SharedSettings, patch: Partial<SharedSettings>): boolean {
+  const a = base as unknown as Record<string, unknown>;
+  const b = newer as unknown as Record<string, unknown>;
+  return Object.keys(patch).some((k) => k !== "id" && k !== "__etag" && JSON.stringify(a[k]) !== JSON.stringify(b[k]));
+}
+
 export const NOT_READ = "Settings could not be read, so they are not saved; reload the page.";
 const CONFLICT = "Someone else saved these settings at the same time. They were read again; make your change again.";
+const OWN_CONFLICT = "Your settings were changed in another tab; reload.";
 const isConflict = (e: unknown): boolean => [409, 412].includes((e as { status?: number }).status ?? 0);
-
 export class Settings {
   private api: Api;
   shared: SharedSettings;
@@ -130,17 +178,36 @@ export class Settings {
   }
   private emit(): void { for (const f of this.listeners) f(); }
 
+  /**
+   * The project's shared settings document: under its id (by the project's id once known), else the
+   * one an older version saved under an older id, copied once to the id it has now (the old one stays).
+   * Null when there is none. A copy that cannot be made now (read-only) is used as read, without a version.
+   */
+  private async readShared(project: string): Promise<Partial<SharedSettings> | null> {
+    const { id, older } = sharedDocIds(project, knownProjectId(project));
+    const doc = await this.api.getDoc("settings", id, "shared");
+    if (doc) return doc as Partial<SharedSettings>;
+    for (const o of older) {
+      const old = await this.api.getDoc("settings", o, "shared");
+      if (!old) continue;
+      const { __etag: _etag, ...body } = old;
+      try {
+        return (await this.api.createDoc("settings", { ...body, id }, "shared")) as Partial<SharedSettings>;
+      } catch (e) {
+        // someone copied it first: theirs counts
+        if (isConflict(e)) return (await this.api.getDoc("settings", id, "shared")) as Partial<SharedSettings> | null;
+        console.warn("Shared settings not copied to their new id", e);
+        return { ...body, id } as Partial<SharedSettings>;
+      }
+    }
+    return null;
+  }
+
   async loadShared(project: string): Promise<void> {
     this.project = project;
-    const { id, legacy } = settingsDocIds(project);
+    const { id } = sharedDocIds(project, knownProjectId(project));
     try {
-      let doc = await this.api.getDoc("settings", id, "shared");
-      if (!doc && legacy !== id) {
-        // saved by an older version under the old id: use it; the next save writes the new id
-        const old = await this.api.getDoc("settings", legacy, "shared");
-        if (old) { doc = { ...old }; delete doc.__etag; }
-      }
-      this.shared = cleanShared(doc as Partial<SharedSettings> | null, id);
+      this.shared = cleanShared(await this.readShared(project), id);
       this.sharedReadFailed = false;
     } catch (e) {
       console.warn("Shared settings not read", e);
@@ -150,19 +217,76 @@ export class Settings {
     this.emit();
   }
 
+  /** a save is running: a read again now could put an older copy over it */
+  private saving = 0;
+
+  /**
+   * Read the shared settings again (while the page is open, a teammate may change the rules); the pages
+   * hear of it only when something changed. A failed read keeps what is here.
+   */
+  async refreshShared(): Promise<void> {
+    if (!this.project || this.saving) return;
+    const project = this.project;
+    let fresh: SharedSettings;
+    try { fresh = cleanShared(await this.readShared(project), sharedDocIds(project, knownProjectId(project)).id); } catch (e) { console.warn("Shared settings not read again", e); return; }
+    if (this.saving || project !== this.project) return;
+    const was = JSON.stringify(this.shared);
+    this.shared = fresh;
+    this.sharedReadFailed = false;
+    if (JSON.stringify(fresh) !== was) this.emit();
+  }
+
+  /** Read the shared settings again every `ms` (2 minutes) while the page is visible; returns the stop. */
+  watchShared(ms = 120_000): () => void {
+    return every(ms, () => this.refreshShared());
+  }
+
+  /**
+   * Save a change to the shared settings: read the newest version first and put the change on it, so a
+   * teammate's change to another part stays. The first save of a project creates the document only when
+   * nobody created it meanwhile (if someone did, theirs is read and the change put on it). When someone
+   * saves between our read and our save, the save is refused and the newer version is read.
+   */
   async saveShared(patch: Partial<SharedSettings>): Promise<void> {
     if (this.sharedReadFailed) throw new Error(NOT_READ);
-    const next = { ...this.shared, ...patch };
-    let saved;
+    this.saving++;
     try {
-      saved = await this.api.setDoc("settings", next as unknown as { id: string }, "shared");
-    } catch (e) {
-      if (!isConflict(e)) throw e;
-      // read the newer version, so the next save carries its version
-      await this.loadShared(this.project);
-      throw new Error(CONFLICT);
+      const { id } = sharedDocIds(this.project, knownProjectId(this.project));
+      // the newest version (quietly: the pages hear of it with the save)
+      // take a newer version; someone changed the same part since this page read it: theirs is not overwritten unseen
+      const take = (doc: Partial<SharedSettings> | null): void => {
+        const fresh = cleanShared(doc, id);
+        const clash = changedParts(this.shared, fresh, patch);
+        this.shared = fresh;
+        if (clash) { this.emit(); throw new Error(CONFLICT); }
+      };
+      let first: Partial<SharedSettings> | null | undefined;
+      try { first = await this.readShared(this.project); } catch (e) { console.warn("Shared settings not read before saving", e); }
+      if (first !== undefined) take(first);
+      for (let attempt = 0; ; attempt++) {
+        const next: SharedSettings = { ...this.shared, ...patch, id };
+        try {
+          const saved = next.__etag == null
+            ? await this.api.createDoc("settings", next as unknown as { id: string }, "shared")
+            : await this.api.setDoc("settings", next as unknown as { id: string }, "shared");
+          // as a read would give it, so the next comparison sees only real changes
+          this.shared = cleanShared({ ...next, __etag: saved.__etag }, id);
+          break;
+        } catch (e) {
+          if (!isConflict(e)) throw e;
+          const created = next.__etag == null;
+          // read the newer version, so the next save carries its version
+          const newer = await this.readShared(this.project).catch(() => null);
+          // someone created the document first: put this change on theirs (once), unless they set the same part
+          if (newer) take(newer);
+          if (created && newer && attempt === 0) continue;
+          this.emit();
+          throw new Error(CONFLICT);
+        }
+      }
+    } finally {
+      this.saving--;
     }
-    this.shared = { ...next, __etag: saved.__etag };
     this.emit();
   }
 
@@ -186,9 +310,10 @@ export class Settings {
       saved = await this.api.setDoc("user", next as unknown as { id: string }, "user");
     } catch (e) {
       if (!isConflict(e)) throw e;
+      // personal settings are only this person's: the other save came from their own other tab
       await this.loadUser();
       this.emit();
-      throw new Error(CONFLICT);
+      throw new Error(OWN_CONFLICT);
     }
     this.user = { ...next, __etag: saved.__etag };
     this.emit();
@@ -237,7 +362,8 @@ function store(key: string, value: unknown): void {
  * stored copy is written, so the page can load again at once.
  */
 export async function resetPrefs(): Promise<void> {
-  const keep = (k: string): boolean => k.startsWith("team:");
+  // the team picked, and the ids of projects and teams (where their storage is) are not screen choices
+  const keep = (k: string): boolean => k.startsWith("team:") || k.startsWith("ids:");
   try {
     const gone: string[] = [];
     for (let i = 0; i < localStorage.length; i++) {
