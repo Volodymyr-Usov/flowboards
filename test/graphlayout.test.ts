@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { findCycles, layoutGraph, linkProblem, reach, sccs } from "../src/views/graphlayout.ts";
+import { findCycles, findLoops, layoutGraph, linkProblem, reach, sccs } from "../src/views/graphlayout.ts";
 
 const E = (pairs: [number, number][]) => pairs.map(([from, to]) => ({ from, to }));
 
@@ -60,6 +60,14 @@ test("strongly connected groups", () => {
 
 test("a self link is a loop", () => {
   assert.deepEqual(findCycles([1, 2], E([[1, 1], [1, 2]])), [[1]]);
+});
+
+test("every node of a group that waits on itself is in a loop, also those off the shortest loop", () => {
+  // 1 → 2 → 1 is the shortest loop; 3 is in the same group (2 → 3 → 1) and must be flagged too
+  const loops = findLoops([1, 2, 3, 4], E([[1, 2], [2, 1], [2, 3], [3, 1], [3, 4], [4, 4]]));
+  assert.deepEqual(loops.map((l) => l.cycle).sort((a, b) => a.length - b.length), [[4], [1, 2]]);
+  assert.deepEqual(loops.find((l) => l.cycle.includes(1))!.members, [1, 2, 3]);
+  assert.deepEqual(loops.find((l) => l.cycle.includes(4))!.members, [4], "a self link");
 });
 
 test("no loops in a DAG", () => {
