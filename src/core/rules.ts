@@ -50,6 +50,8 @@ export interface Facts {
   kind: Rule["level"];
   description: string;
   acceptance: string;
+  /** false: the item's type has no acceptance criteria field, so a rule cannot ask for them */
+  hasAcceptanceField?: boolean;
   hasOwner: boolean;
   hasParent: boolean;
   hasEffort: boolean;
@@ -104,7 +106,7 @@ export function missingParts(rule: Rule, f: Facts): MissingPart[] {
   for (const r of rule.requires) {
     const ok = {
       description: f.description.trim().length >= 20,
-      acceptance: f.acceptance.trim().length >= 10,
+      acceptance: f.hasAcceptanceField === false || f.acceptance.trim().length >= 10,
       owner: f.hasOwner,
       parent: f.hasParent,
       effort: f.hasEffort,
@@ -179,15 +181,19 @@ export function checkMove(rules: Rule[], f: Facts, steps: string[], from: string
   return { ok: problems.length === 0, problems };
 }
 
-/** A sensible starting set, offered on the settings page; nothing is on until someone saves it. */
-export function suggestedRules(states: { name: string; category: string }[]): Rule[] {
+/**
+ * A sensible starting set, offered on the settings page; nothing is on until someone saves it.
+ * `acceptance`: the stories have an acceptance criteria field (not every process has one).
+ */
+export function suggestedRules(states: { name: string; category: string }[], opts: { acceptance?: boolean } = {}): Rule[] {
+  const acceptance = opts.acceptance !== false;
   const first = (cat: string) => states.find((s) => s.category === cat)?.name;
   const out: Rule[] = [];
   const active = first("InProgress");
   const resolved = first("Resolved");
   const done = first("Completed");
   if (active) out.push({ id: "r-active", level: "requirement", target: active, requires: ["description", "owner", "parent"], onlyBy: [], note: "Work starts only when it is described and someone owns it." });
-  if (resolved) out.push({ id: "r-resolved", level: "requirement", target: resolved, requires: ["acceptance", "prsMerged"], onlyBy: [] });
+  if (resolved) out.push({ id: "r-resolved", level: "requirement", target: resolved, requires: acceptance ? ["acceptance", "prsMerged"] : ["prsMerged"], onlyBy: [] });
   if (done) out.push({ id: "r-done", level: "requirement", target: done, requires: ["childrenDone", "prsMerged"], onlyBy: [], note: "Add a person to let only them close stories." });
   return out;
 }

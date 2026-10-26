@@ -74,7 +74,7 @@ function workspace(api: Api, held: WorkItem[]): Workspace {
 test("a failed read keeps the last sync time, so the change is read next time", async () => {
   const { s, api } = fakeServer();
   const ws = workspace(api, [item(1, "New")]);
-  s.items.set(1, item(1, "Doing", { rev: 2 }));
+  s.items.set(1, item(1, "Doing", { rev: 2, changed: "2026-10-02T09:00:00.000Z" }));
   s.changed = [1];
   s.failItems = true;
   await ws.poll();
@@ -84,6 +84,7 @@ test("a failed read keeps the last sync time, so the change is read next time", 
   await ws.poll();
   assert.equal(ws.get(1)?.state, "Doing");
   assert.notEqual(ws.lastSync, "2026-10-01T00:00:00.000Z");
+  assert.ok(ws.lastSync <= "2026-10-02T09:00:00.000Z", "the mark is the change's time (Azure DevOps's clock), not this computer's");
   assert.equal(ws.status, "live");
 });
 

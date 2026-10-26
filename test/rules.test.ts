@@ -34,6 +34,15 @@ test("suggested rules follow the categories", () => {
   assert.deepEqual(s.map((r) => r.target), ["Doing", "Done"]);
 });
 
+test("acceptance criteria: not asked of a type that has no such field, not suggested where stories have none", () => {
+  const r = rule("Resolved", ["acceptance"]);
+  assert.deepEqual(missing(r, facts()), ["Acceptance criteria"]);
+  assert.deepEqual(missing(r, facts({ hasAcceptanceField: false })), [], "a type without the field passes");
+  const states = [{ name: "New", category: "Proposed" }, { name: "Doing", category: "InProgress" }, { name: "Resolved", category: "Resolved" }];
+  assert.deepEqual(suggestedRules(states).find((x) => x.target === "Resolved")?.requires, ["acceptance", "prsMerged"]);
+  assert.deepEqual(suggestedRules(states, { acceptance: false }).find((x) => x.target === "Resolved")?.requires, ["prsMerged"]);
+});
+
 test("a rule from one state to another names the fields it needs", () => {
   const r: Rule = { id: "x", level: "requirement", target: "Resolved", from: "Active", requires: [], onlyBy: [], fields: ["Custom.Release", "System.Description"] };
   assert.deepEqual(rulesForMove([r], "requirement", steps, "Active", "Resolved").length, 1);

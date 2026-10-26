@@ -7,6 +7,7 @@ import type { Workspace } from "../core/workspace.ts";
 import { orderedStates } from "../core/model.ts";
 import type { Requirement, Rule } from "../core/rules.ts";
 import { fieldTitle, REQUIREMENTS } from "../core/rules.ts";
+import { AC_FIELD, typeHasField } from "../core/health.ts";
 import { h, icon } from "../ui/dom.ts";
 import { keepFocus } from "../ui/focuskeep.ts";
 import { avatar, dialog, errorText, help, personPicker, popup, select, toast } from "../ui/kit.ts";
@@ -37,6 +38,11 @@ function levelTypes(ws: Workspace, level: Rule["level"]): string[] {
   const levels = ws.process.levels;
   const of = (k: Level["kind"]): string[] => levels.filter((l) => l.kind === k).flatMap((l) => l.types);
   return level === "*" ? levels.flatMap((l) => l.types) : of(level);
+}
+
+/** Does any type of this level have acceptance criteria? (Basic's Issue and some custom types do not.) */
+export function levelHasAcceptance(ws: Workspace, level: Rule["level"]): boolean {
+  return levelTypes(ws, level).some((t) => typeHasField(ws.process, t, AC_FIELD));
 }
 
 function placeOptions(ws: Workspace, rule: Rule): { cols: string[]; states: string[] } {
@@ -162,7 +168,8 @@ export function ruleCard(app: App, rule: Rule, i: number, list: Rule[], ctx: Edi
       h("label.set-field", null, h("span", null, "Move to"), targetOptions(ws, rule, ctx))),
     h("div.set-field", null, h("span", null, "Fields that must be filled", help("Pick any field of this level's work item types. The move is stopped while one of them is empty.")), fieldChips(ws, rule, ctx)),
     h("div.set-field", null, h("span", null, "Needs"),
-      h("div.set-checks", null, REQUIREMENTS.map((r, k) => h("label.set-check", { title: r.help },
+      // acceptance criteria only where the level's types have them (still shown when a saved rule asks for them)
+      h("div.set-checks", null, REQUIREMENTS.filter((r) => r.id !== "acceptance" || rule.requires.includes(r.id) || levelHasAcceptance(ws, rule.level)).map((r, k) => h("label.set-check", { title: r.help },
         h("input", {
           type: "checkbox", checked: rule.requires.includes(r.id), "data-fk": k === 0 ? `rule:${rule.id}:needs` : `rule:${rule.id}:needs:${r.id}`,
           onchange: (e: Event) => {

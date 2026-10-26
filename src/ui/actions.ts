@@ -4,13 +4,14 @@
 import { REL, relId } from "../api/api.ts";
 import type { DeletedItem, WorkItem } from "../api/types.ts";
 import type { CheckItem, Checklists } from "../core/checklist.ts";
+import { AC_FIELD, typeHasField } from "../core/health.ts";
 import { levelOf } from "../core/model.ts";
 import type { MoveCheck, Requirement } from "../core/rules.ts";
 import { fieldTitle, isEmptyValue } from "../core/rules.ts";
 import type { ChildTemplate } from "../core/templates.ts";
 import { missingChildren } from "../core/templates.ts";
 import type { FieldChange, WriteResult } from "../core/writes.ts";
-import { RuleError, Writer } from "../core/writes.ts";
+import { ConflictError, RuleError, Writer } from "../core/writes.ts";
 import { h, once } from "./dom.ts";
 import { textToHtml } from "./sanitize.ts";
 import { dialog, errorText, toast } from "./kit.ts";
@@ -32,11 +33,19 @@ export function undoAll(undos: (() => Promise<unknown>)[]): (() => Promise<void>
   });
 }
 
+/** The failed steps of a batch for its message: the first three with why, then how many more. */
+export function failedSteps(failed: { label: string; error: string }[]): string {
+  const shown = failed.slice(0, 3).map((f) => `${f.label} (${f.error})`).join("; ");
+  return failed.length > 3 ? `${shown}; and ${failed.length - 3} more` : shown;
+}
+
 export class Actions {
   writer: Writer;
   readOnly = false;
   /** why the last change failed (shown next to an editor that keeps the typed text) */
   lastError = "";
+  /** the last change was refused because someone else changed the same field meanwhile (null: it was not) */
+  lastConflict: ConflictError | null = null;
 
   constructor(writer: Writer) { this.writer = writer; }
 
@@ -52,11 +61,14 @@ export class Actions {
     try {
       const r = await job();
       this.lastError = "";
+      this.lastConflict = null;
       if (r.undo && !quiet) toast(done(r), { kind: "ok", undo: r.undo, action });
       return r.item;
     } catch (e) {
       this.lastError = errorText(e);
-      toast(this.lastError, { kind: "error" });
+      this.lastConflict = e instanceof ConflictError ? e : null;
+      // a box saved as someone types shows a conflict itself, with the choice; no message at each try
+      if (!(quiet && this.lastConflict)) toast(this.lastError, { kind: "error" });
       return null;
     }
   }
@@ -108,17 +120,30 @@ export class Actions {
     return this.writer.logged(action, what, job);
   }
 
-  async setFields(id: number, changes: FieldChange[], message?: string, quiet = false): Promise<WorkItem | null> {
-    return this.run(() => this.writer.setFields(id, changes), () => message ?? `Saved ${this.label(id)}`, quiet);
+  /**
+   * `expect`: the values the edit started from (field → value); when someone else changed one of
+   * those fields meanwhile, nothing is saved and lastConflict says so.
+   */
+  async setFields(id: number, changes: FieldChange[], message?: string, quiet = false, expect?: Record<string, unknown>): Promise<WorkItem | null> {
+    return this.run(() => this.writer.setFields(id, changes, { expect }), () => message ?? `Saved ${this.label(id)}`, quiet);
   }
 
-  async setField(id: number, field: string, value: unknown, message?: string): Promise<WorkItem | null> {
-    return this.setFields(id, [{ field, value }], message);
+  /** `from`: the value the edit box started from (see setFields' expect). */
+  async setField(id: number, field: string, value: unknown, message?: string, from?: { value: unknown }): Promise<WorkItem | null> {
+    return this.setFields(id, [{ field, value }], message, false, from ? { [field]: from.value } : undefined);
   }
 
-  /** Saved as someone types (description, acceptance criteria): no "Saved, Undo" message each time; the box shows it. */
-  async saveTyped(id: number, field: string, value: unknown): Promise<WorkItem | null> {
-    return this.setFields(id, [{ field, value }], undefined, true);
+  /**
+   * Saved as someone types (description, acceptance criteria): no "Saved, Undo" message each time; the box shows it.
+   * `from`: the value the box was opened (or last saved) with: a change by someone else meanwhile is not overwritten.
+   */
+  async saveTyped(id: number, field: string, value: unknown, from?: { value: unknown }): Promise<WorkItem | null> {
+    return this.setFields(id, [{ field, value }], undefined, true, from ? { [field]: from.value } : undefined);
+  }
+
+  /** Add and remove tags; tags someone else changed meanwhile stay as they are. */
+  async changeTags(id: number, add: string[], remove: string[], message?: string): Promise<WorkItem | null> {
+    return this.run(() => this.writer.changeTags(id, add, remove), () => message ?? `Tags of ${this.label(id)} changed`);
   }
 
   /**
@@ -190,7 +215,8 @@ export class Actions {
       row("Description", t);
       changes.push(() => (t.value.trim() ? { field: "System.Description", value: textToHtml(t.value) } : null));
     }
-    if (reqs.has("acceptance")) {
+    // a type without acceptance criteria (Basic's Issue, a custom type) gets no box for them
+    if (reqs.has("acceptance") && typeHasField(ws.process, it.type, AC_FIELD)) {
       const t = area("The acceptance criteria, at least 10 characters");
       row("Acceptance criteria", t);
       changes.push(() => (t.value.trim() ? { field: "Microsoft.VSTS.Common.AcceptanceCriteria", value: textToHtml(t.value) } : null));
@@ -215,7 +241,11 @@ export class Actions {
     if (reqs.has("tags")) {
       const t = h("input.input", { type: "text", placeholder: "A tag (several with ;)", "aria-label": "Tag" }) as HTMLInputElement;
       row("Tag", t);
-      changes.push(() => { const add = t.value.split(/[;,]/).map((x) => x.trim()).filter(Boolean); return add.length ? { field: "System.Tags", value: [...it.tags, ...add].join("; ") } : null; });
+      // only the new tags are sent, added to what the item has then
+      after.push(async () => {
+        const add = t.value.split(/[;,]/).map((x) => x.trim()).filter(Boolean);
+        if (add.length) await this.changeTags(id, add, [], `Tags added to ${this.label(id)}`);
+      });
     }
     if (reqs.has("hasChildren")) {
       const lvl = levelOf(ws.process, it.type);
@@ -301,7 +331,8 @@ export class Actions {
     if (this.readOnly) { toast("Read-only: you cannot create work items here.", { kind: "error" }); return null; }
     try {
       const item = await this.writer.create(type, fields, parentId);
-      toast(`Created ${type} #${item.id}`, { kind: "ok", timeout: 8000, action: this.onOpen ? { label: "Open", run: () => this.onOpen?.(item.id) } : undefined });
+      // Undo deletes it again (to the Recycle Bin, where it can be brought back)
+      toast(`Created ${type} #${item.id}`, { kind: "ok", timeout: 8000, undo: () => this.deleteMade([item]), action: this.onOpen ? { label: "Open", run: () => this.onOpen?.(item.id) } : undefined });
       return item;
     } catch (e) {
       toast(errorText(e), { kind: "error" });
@@ -353,16 +384,27 @@ export class Actions {
           if (pf.original && has(pf.original)) fields[pf.original] = t.remaining;
         }
         try { made.push(await this.writer.create(type, fields, parentId)); } catch (e) {
-          toast(`${made.length ? `Added ${made.length}, then stopped: ` : ""}${errorText(e)}`, { kind: "error" });
+          const undone = [...made];
+          toast(`${made.length ? `Added ${made.length}, then stopped: ` : ""}${errorText(e)}`, { kind: "error", undo: made.length ? () => this.deleteMade(undone) : undefined });
           return made;
         }
       }
-      toast(`Added ${made.length} standard ${made.length === 1 ? childLevel.defaultType.toLowerCase() : childLevel.name.toLowerCase()} under ${this.label(parentId)}`, { kind: "ok" });
+      const undone = [...made];
+      toast(`Added ${made.length} standard ${made.length === 1 ? childLevel.defaultType.toLowerCase() : childLevel.name.toLowerCase()} under ${this.label(parentId)}`, { kind: "ok", undo: () => this.deleteMade(undone) });
       return made;
     } catch (e) {
       toast(errorText(e), { kind: "error" });
       return null;
     }
+  }
+
+  /**
+   * The Undo of a create: the items made go to the Recycle Bin (the last made first). One that someone
+   * changed meanwhile goes too: it can be brought back from the Recycle Bin.
+   */
+  private async deleteMade(items: WorkItem[]): Promise<void> {
+    this.writable();
+    await undoAll(items.map((it) => () => this.writer.deleteItem(it.id)))?.();
   }
 
   /** Delete a work item (to the Recycle Bin), with Undo. Ask the person first. */
@@ -415,8 +457,8 @@ export class Actions {
     }
     const undo = undoAll(undos);
 
-    if (done) toast(failed.length ? `${message}; ${failed.length} of ${steps.length} changes failed` : message, { kind: failed.length ? "error" : "ok", undo });
-    else if (failed.length) toast(`Nothing changed: ${failed[0].error}`, { kind: "error" });
+    if (done) toast(failed.length ? `${message}; ${failed.length} of ${steps.length} changes failed: ${failedSteps(failed)}` : message, { kind: failed.length ? "error" : "ok", undo });
+    else if (failed.length) toast(`Nothing changed: ${failed.length === 1 ? failed[0].error : failedSteps(failed)}`, { kind: "error" });
     return { done, failed };
   }
 
