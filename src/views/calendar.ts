@@ -20,10 +20,10 @@ import { undoAll } from "../ui/actions.ts";
 import { avatar, closePopup, dialog, errorText, help, popup, segmented, stateMark, toast, toggle, typeMark } from "../ui/kit.ts";
 import type { Away, DaysOffChange, TeamEvent } from "./daysoff.ts";
 import { applyDaysOff, awayFrom, eventDays, followTo, rangeSummary, splitBySprint } from "./daysoff.ts";
-import type { Day } from "./timeaxis.ts";
+import type { Day } from "../core/timeaxis.ts";
 import {
   addMonths, dayKey, fmtDay, fmtSpan, localDay, monthGrid, monthKey, monthStart, packLanes, parseMonthKey, parts, planDay, planIso, todayDay, weekday,
-} from "./timeaxis.ts";
+} from "../core/timeaxis.ts";
 
 const TARGET = "Microsoft.VSTS.Scheduling.TargetDate";
 const DUE = "Microsoft.VSTS.Scheduling.DueDate";

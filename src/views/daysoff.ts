@@ -2,8 +2,8 @@
 // sprint (in the team's capacity); a range that spans sprints is split, and parts outside every
 // sprint cannot be kept there. Covered by test/daysoff.test.ts.
 import type { Capacity, Iteration, Person } from "../api/types.ts";
-import type { Day } from "./timeaxis.ts";
-import { dayKey, planDay, weekday } from "./timeaxis.ts";
+import type { Day } from "../core/timeaxis.ts";
+import { dayKey, planDay, weekday } from "../core/timeaxis.ts";
 
 export interface Away {
   kind: "person" | "team";

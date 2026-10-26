@@ -10,7 +10,7 @@ import type { CheckItem } from "../core/checklist.ts";
 import { cleanList, fromList, moveItem, newCheckItem, progress, tick } from "../core/checklist.ts";
 import { AC_FIELD, typeHasField } from "../core/health.ts";
 import { daysInState, daysSince, fmtDate, fmtDays, isDone, leaf, levelOf, orderedStates, plainText } from "../core/model.ts";
-import { fromYmd, planIso, planKey } from "../views/timeaxis.ts";
+import { fromYmd, planIso, planKey } from "../core/timeaxis.ts";
 import { cleanTemplates, missingChildren } from "../core/templates.ts";
 import { fieldLabel } from "../core/writes.ts";
 import { draftTasks, draftTexts } from "./aihelp.ts";

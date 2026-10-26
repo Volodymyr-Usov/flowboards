@@ -15,7 +15,7 @@ import { dialog, empty, failed, itemPicker, menu, segmented, spinner, toast, tog
 import type { Edge } from "./graphlayout.ts";
 import { edgeKey, findLoops, layoutGraph, linkProblem as loopOrTwice, reach } from "./graphlayout.ts";
 import { dependencyPairs } from "./roadmaplogic.ts";
-import { fmtDay, planDay } from "./timeaxis.ts";
+import { fmtDay, planDay } from "../core/timeaxis.ts";
 
 const W = 220;
 const H = 62;

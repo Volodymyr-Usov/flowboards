@@ -15,7 +15,7 @@ import { sortable } from "../ui/sortable.ts";
 import { avatar, dialog, empty, errorText, help, spinner, stateMark, toast, toggle, typeMark } from "../ui/kit.ts";
 import { burndownPanel } from "./burndownpanel.ts";
 import { dayOffDialog } from "./calendar.ts";
-import { dayKey, planDay, todayDay } from "./timeaxis.ts";
+import { dayKey, planDay, todayDay } from "../core/timeaxis.ts";
 import { goalId, goalStore, openSprintReport } from "./sprintreport.ts";
 import type { Goal } from "./sprintreport.ts";
 import { canSplit, cleanupSteps, dropNeighbors, escapeHtml, guardSteps, nextSprint, sprintOver, tasksInSprint, workingDaysLeft } from "./sprintlogic.ts";

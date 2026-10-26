@@ -79,7 +79,11 @@ export function runsToPrune(runs: RunDoc[], schedules: Set<string>, today: strin
     if (r.id.startsWith("prune-")) return r.id !== pruneMark(today);
     if (!r.id.startsWith("r-")) return false;
     if (!schedules.has(r.scheduleId)) return true;
-    return !keep.has(r) && typeof r.date === "string" && r.date < cut;
+    if (keep.has(r) || typeof r.date !== "string") return false;
+    // an outlook's key is its target date: it stays due until then, so its record is kept until that date is old too
+    const key = r.key ?? r.id.slice(`r-${r.scheduleId}-`.length);
+    const last = /^\d{4}-\d{2}-\d{2}$/.test(key) && key > r.date ? key : r.date;
+    return last < cut;
   }).map((r) => r.id);
 }
 

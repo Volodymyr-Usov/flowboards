@@ -44,5 +44,5 @@ export function toWiql(spec: QuerySpec, currentProject: string): string {
 
 /** WIQL compares dates by day unless asked for time precision. */
 export function needsTimePrecision(spec: QuerySpec): boolean {
-  return [spec.changedAfter, spec.createdAfter, spec.closedAfter, spec.closedBefore].some((d) => d?.includes("T"));
+  return [spec.changedAfter, spec.createdAfter, spec.closedAfter, spec.closedBefore, spec.asOf].some((d) => d?.includes("T"));
 }

@@ -2,7 +2,7 @@
 // (the item that waits starts before the item it waits for ends), also across teams.
 import { REL, relId } from "../api/api.ts";
 import type { WorkItem } from "../api/types.ts";
-import type { Span } from "./timeaxis.ts";
+import type { Span } from "../core/timeaxis.ts";
 
 export interface Dependency {
   /** the item waited for */

@@ -202,3 +202,12 @@ test("each team keeps its own filters; the old page key moves to the first team 
   assert.deepEqual(m.get(a), [{ prop: "state", values: ["New"] }], "a team's own choice stays");
   assert.equal(teamKey(store, "board.filters", "", [], empty), "board.filters", "no team known: the page key");
 });
+
+test("date filters: a target date is the day the person picked; created is the local day", async () => {
+  const { BASE_PROPS } = await import("../src/core/filters.ts");
+  const target = BASE_PROPS.find((p) => p.id === "target")!;
+  const created = BASE_PROPS.find((p) => p.id === "created")!;
+  const w = { targetDate: "2026-10-20T22:00:00Z", created: new Date(2026, 9, 21, 0, 30).toISOString() } as unknown as Parameters<typeof target.get>[0];
+  assert.equal(target.get(w), "2026-10-21"); // Berlin midnight of 21 October
+  assert.equal(created.get(w), "2026-10-21"); // 00:30 local time
+});

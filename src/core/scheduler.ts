@@ -3,7 +3,7 @@
 // every occurrence that is due and not made yet. Dates are plain "YYYY-MM-DD" days in the browser's own
 // calendar, so nothing here depends on a time zone or on daylight saving.
 import type { Iteration } from "../api/types.ts";
-import { planKey } from "../views/timeaxis.ts";
+import { planKey } from "./timeaxis.ts";
 import type { ChildTemplate } from "./templates.ts";
 import { cleanTemplates } from "./templates.ts";
 

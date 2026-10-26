@@ -318,3 +318,15 @@ test("clean-up: old records, a deleted schedule's records and old marks go; the 
   ];
   assert.deepEqual(runsToPrune(runs, new Set(["a", "b"]), "2026-10-26").sort(), ["prune-2026-10-24", "r-a-2026-08-01", "r-gone-2026-10-20"]);
 });
+
+test("clean-up keeps an outlook's record until its target date is old, so a long lead never makes it twice", () => {
+  const made: RunDoc = { id: "r-o-2027-03-01", scheduleId: "o", key: "2027-03-01", date: "2026-12-31", state: "done", by: "", at: "", itemId: 5 };
+  const newer: RunDoc = { id: "r-o-2027-06-01", scheduleId: "o", key: "2027-06-01", date: "2027-04-02", state: "done", by: "", at: "", itemId: 6 };
+  // 2027-02-10: the first story was made 41 days ago, but its target is ahead: kept
+  assert.deepEqual(runsToPrune([made, newer], new Set(["o"]), "2027-02-10"), []);
+  // a month after the target date it may go (the newest record stays for the turn)
+  assert.deepEqual(runsToPrune([made, newer], new Set(["o"]), "2027-04-05"), ["r-o-2027-03-01"]);
+  // the key read from the id when the record has none
+  const { key: _k, ...noKey } = made;
+  assert.deepEqual(runsToPrune([noKey, newer], new Set(["o"]), "2027-02-10"), []);
+});

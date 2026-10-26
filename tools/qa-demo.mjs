@@ -181,7 +181,15 @@ for (const w of [1800, 1000, 700]) {
 // 7. tags in colour, the new mark, the Taskboard's extras, the bin on a task, the panel's blue keys
 {
   const page = await open(1800);
-  await page.evaluate(() => localStorage.setItem("ado-dashboard:board", JSON.stringify({ incoming: true })));
+  // the New column on: the Board's choices are kept per team ("ado-dashboard:board:<project>/<team>"), the old key is read once
+  await page.evaluate(() => {
+    const keys = Object.keys(localStorage).filter((k) => k === "ado-dashboard:board" || k.startsWith("ado-dashboard:board:"));
+    for (const k of new Set(["ado-dashboard:board", ...keys])) {
+      let v = {};
+      try { v = JSON.parse(localStorage.getItem(k) ?? "{}") ?? {}; } catch { v = {}; }
+      localStorage.setItem(k, JSON.stringify({ ...v, incoming: true }));
+    }
+  });
   await page.reload();
   await page.waitForTimeout(1500);
   await page.getByRole("radio", { name: "Board", exact: true }).click();

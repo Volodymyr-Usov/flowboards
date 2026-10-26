@@ -3,7 +3,7 @@ import { test } from "node:test";
 import {
   addMonths, clip, dayIso, dayKey, dragSpan, dragDays, fromYmd, localDay, monthGrid, monthKey, monthStart, packLanes,
   parseMonthKey, parts, planDay, planIso, planKey, quarterStart, ticks, todayKey, union, weekday, weekStart,
-} from "../src/views/timeaxis.ts";
+} from "../src/core/timeaxis.ts";
 
 test("planDay rounds a planning date to the day the person picked", () => {
   const oct21 = fromYmd(2026, 9, 21);
@@ -105,4 +105,13 @@ test("planIso writes local midnight, and planDay and planKey read back the same 
   assert.equal(planKey(undefined), "");
   assert.equal(planKey("2026-10-20T22:00:00Z"), "2026-10-21"); // Berlin midnight
   assert.equal(todayKey(new Date(2026, 9, 25, 23, 30)), "2026-10-25");
+});
+
+test("a day key turns into the planning date Azure DevOps gets, and back", async () => {
+  const { parseDayKey, planIsoOfKey } = await import("../src/core/timeaxis.ts");
+  assert.equal(parseDayKey("2026-10-21"), fromYmd(2026, 9, 21));
+  assert.equal(parseDayKey("21.10.2026"), null);
+  assert.equal(planKey(planIsoOfKey("2027-03-01")), "2027-03-01");
+  assert.equal(new Date(planIsoOfKey("2027-03-01")).getHours(), 0);
+  assert.equal(planIsoOfKey(""), "");
 });

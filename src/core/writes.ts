@@ -34,7 +34,7 @@ export class ConflictError extends Error {
   item: WorkItem;
   fields: string[];
   constructor(item: WorkItem, fields: string[]) {
-    super(`${fields.map(fieldLabel).join(", ")} of #${item.id} was changed by someone else meanwhile. Nothing was saved, so their change stays.`);
+    super(`${fields.map(fieldLabel).join(", ")} of #${item.id} was changed meanwhile (by someone else, or by you in another tab). Nothing was saved, so that change stays.`);
     this.item = item;
     this.fields = fields;
   }

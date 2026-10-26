@@ -8,6 +8,8 @@ import { wsjfSetup } from "./wsjf.ts";
 
 /** How far before the sync mark each poll asks again, for changes saved a moment out of order. */
 export const SYNC_OVERLAP = 2 * 60_000;
+/** Polls with the overlap: every this many (the others ask from the mark itself). */
+export const OVERLAP_EVERY = 4;
 
 /**
  * The next sync mark: the newest change among the items read (Azure DevOps's time, so this computer's
@@ -231,8 +233,10 @@ export class Workspace {
       const areas = this.opts.teamAreaOnly && this.settings.areas.length ? this.settings.areas : undefined;
       const started = Date.now();
       // a little overlap: a change saved on another server a moment before the newest one we saw is not missed
-      // (items read again with the same revision are left out by take)
-      const since = new Date(Date.parse(this.lastSync) - SYNC_OVERLAP).toISOString();
+      // (items read again with the same revision are left out by take). Every 4th poll (about 2 minutes) only,
+      // so a bulk edit is not read again by every open page every 30 seconds.
+      const overlap = (this.pollCount + 1) % OVERLAP_EVERY === 0 ? SYNC_OVERLAP : 0;
+      const since = new Date(Date.parse(this.lastSync) - overlap).toISOString();
       const ids = await this.api.query(this.project, { types, areas, changedAfter: since });
       // items we show from other areas (parents) are checked too
       const outside = [...this.items.values()].filter((i) => areas && !areas.some((a) => i.area === a.path || (a.includeChildren && i.area.startsWith(a.path + "\\")))).map((i) => i.id);

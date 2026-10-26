@@ -3,6 +3,7 @@
 // a number range, a date range, or yes/no; person filters (only these people, hide those); and the
 // text search. Pure logic, no page: tested in test/filters.test.ts. The page parts: src/ui/filterbar.ts.
 import type { Person, WorkItem } from "../api/types.ts";
+import { dayKey, localDay, planKey } from "./timeaxis.ts";
 import { personKey } from "./model.ts";
 
 export type PropKind = "set" | "number" | "date" | "bool";
@@ -37,7 +38,10 @@ const leafOf = (path: string): string => path.split("\\").pop() ?? path;
 /** a person in property filters: the sign-in name (lower case; two people can share a display name), "" for nobody */
 const who = (p: Person | undefined): string => (p ? personKey(p) : "");
 const nameOf = (p: Person | undefined): string => p?.displayName ?? "";
-const day = (iso: string | undefined): string | undefined => (iso ? iso.slice(0, 10) : undefined);
+/** a moment (created, changed, closed): its day in the local calendar */
+const day = (iso: string | undefined): string | undefined => (iso && !Number.isNaN(Date.parse(iso)) ? dayKey(localDay(iso)) : undefined);
+/** a planning date (target, due, a date field): the day the person picked, in any time zone */
+const planDate = (iso: string | undefined): string | undefined => planKey(iso) || undefined;
 const ISO = /^\d{4}-\d\d-\d\dT/;
 
 /** The fixed properties every work item has. */
@@ -59,7 +63,7 @@ export const BASE_PROPS: Prop[] = [
   { id: "created", label: "Created", kind: "date", get: (w) => day(w.created) },
   { id: "changed", label: "Changed", kind: "date", get: (w) => day(w.changed) },
   { id: "closed", label: "Closed", kind: "date", get: (w) => day(w.closed) },
-  { id: "target", label: "Target date", kind: "date", get: (w) => day(w.targetDate ?? w.dueDate) },
+  { id: "target", label: "Target date", kind: "date", get: (w) => planDate(w.targetDate ?? w.dueDate) },
   { id: "hasDesc", label: "Has a description", kind: "bool", get: (w) => Boolean(w.description && w.description.replace(/<[^>]*>/g, "").trim()) },
   { id: "hasAc", label: "Has acceptance criteria", kind: "bool", get: (w) => Boolean(w.acceptance && w.acceptance.replace(/<[^>]*>/g, "").trim()) },
   { id: "hasParent", label: "Has a parent", kind: "bool", get: (w) => Boolean(w.parent) },
@@ -103,7 +107,7 @@ export function fieldProps(items: Iterable<WorkItem>, names: Record<string, stri
     out.push({
       id: `field:${ref}`, label, kind,
       get: kind === "set" ? (w) => { const v = raw(w); return [v == null ? "" : typeof v === "object" ? String((v as { displayName?: string }).displayName ?? "") : String(v)]; }
-        : kind === "date" ? (w) => { const v = raw(w); return typeof v === "string" ? v.slice(0, 10) : undefined; }
+        : kind === "date" ? (w) => { const v = raw(w); return typeof v === "string" ? planDate(v) : undefined; }
         : kind === "bool" ? (w) => Boolean(raw(w))
         : (w) => { const v = raw(w); return typeof v === "number" ? v : undefined; },
     });

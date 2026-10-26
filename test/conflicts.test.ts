@@ -89,7 +89,7 @@ test("an edit box saves only over the text it was opened with: a teammate's newe
   teammate(1, { [DESC]: "<p>theirs</p>" });
   poll(1);
   await assert.rejects(w.setFields(1, [{ field: DESC, value: "<p>mine</p>" }], { expect: { [DESC]: "<p>first</p>" } }),
-    (e: Error) => e instanceof ConflictError && /changed by someone else meanwhile/.test(e.message) && e.fields[0] === DESC);
+    (e: Error) => e instanceof ConflictError && /changed meanwhile \(by someone else/.test(e.message) && e.fields[0] === DESC);
   assert.equal(s.sent.length, 0, "nothing was sent");
   assert.equal(s.items.get(1)!.fields[DESC], "<p>theirs</p>");
   // a teammate's change of another field is no conflict: the save goes through over the newest revision
@@ -237,12 +237,12 @@ test("sync mark: Azure DevOps's newest change less the time the reads took, neve
   assert.equal(syncMark("", [{ changed: "" }], 0), "");
 });
 
-test("the poll asks from a little before the mark and moves the mark by what it read, not by this computer's clock", async () => {
+test("the poll asks from the mark (every 4th time from a little before it) and moves the mark by what it read, not by this computer's clock", async () => {
   const { s, ws } = setup(item(1, 1));
   s.items.set(1, item(1, 2, {}, { changed: "2026-10-03T12:00:00.000Z" }));
   s.changed = [1];
   await ws.poll();
-  assert.equal(s.asked[0].changedAfter, new Date(Date.parse("2026-10-01T00:00:00.000Z") - SYNC_OVERLAP).toISOString());
+  assert.equal(s.asked[0].changedAfter, new Date(Date.parse("2026-10-01T00:00:00.000Z")).toISOString());
   assert.equal(ws.get(1)?.rev, 2);
   const mark = ws.lastSync;
   assert.ok(mark <= "2026-10-03T12:00:00.000Z" && mark > "2026-10-03T11:59:00.000Z", mark);
@@ -250,6 +250,10 @@ test("the poll asks from a little before the mark and moves the mark by what it 
   s.items.set(1, item(1, 2, {}, { changed: "2026-10-02T00:00:00.000Z" }));
   await ws.poll();
   assert.equal(ws.lastSync, mark);
+  assert.equal(s.asked[s.asked.length - 1].changedAfter, mark);
+  // the 4th poll looks back a little further, for changes saved a moment out of order
+  await ws.poll();
+  await ws.poll();
   assert.equal(s.asked[s.asked.length - 1].changedAfter, new Date(Date.parse(mark) - SYNC_OVERLAP).toISOString());
 });
 

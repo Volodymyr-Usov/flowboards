@@ -39,8 +39,9 @@ export function filteredSummary(parts: FilterPart[]): { text: string; title: str
   const off = hidden.reduce((a, p) => a + p.count, 0);
   const says = parts.flatMap((p) => (p.count ? p.says : []));
   const names = [...new Set(hidden.map((p) => (p.what === "people" ? "the person chips" : "the Filter button")))];
+  const many = names.length > 1 || names[0] === "the person chips"; // "the person chips are", "the Filter button is"
   const offText = names.length
-    ? ` ${names.join(" and ").replace(/^t/, "T")} ${names.length > 1 ? "are" : "is"} switched off in Settings > Menu & bars, but still filter${names.length > 1 ? "" : "s"} this page.`
+    ? ` ${names.join(" and ").replace(/^t/, "T")} ${many ? "are" : "is"} switched off in Settings > Menu & bars, but still filter${many ? "" : "s"} this page.`
     : "";
   return {
     text: `Filtered: ${n}${off ? ` (${off} hidden)` : ""}`,

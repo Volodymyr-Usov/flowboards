@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Iteration } from "../src/api/types.ts";
 import { addRange, applyDaysOff, awayFrom, dayRanges, followTo, rangeSummary, removeRange, splitBySprint, workingDaysIn } from "../src/views/daysoff.ts";
-import { planDay } from "../src/views/timeaxis.ts";
+import { planDay } from "../src/core/timeaxis.ts";
 
 const d = (s: string): number => planDay(s + "T00:00:00Z")!;
 const sprint = (id: string, start: string, finish: string): Iteration => ({ id, name: id, path: id, start: start + "T00:00:00Z", finish: finish + "T00:00:00Z" });

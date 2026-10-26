@@ -3,7 +3,7 @@
 import { REL, relId } from "../api/api.ts";
 import type { Iteration, Level, ProcessInfo, WorkItem } from "../api/types.ts";
 import { DAY, daysSince, hasText, isDone, isOpen, isRemoved, levelOf, orderedStates } from "./model.ts";
-import { planKey, todayKey } from "../views/timeaxis.ts";
+import { planKey, todayKey } from "./timeaxis.ts";
 import type { Filter, Prop } from "./filters.ts";
 import { passesAll } from "./filters.ts";
 
@@ -198,7 +198,8 @@ export function runChecks(input: HealthInput): Finding[] {
     // only once its links are read: a child that is not loaded (another team's area, closed long ago) may be open
     if (open && !isDone(it) && children.length && children.every(isDone) && it.relations) {
       const states = linkedChildren(it).filter((id) => !byId.has(id)).map((id) => input.outside?.get(id) ?? "open");
-      if (!states.includes("open")) add("canClose", it, `All ${plural(children.length + states.filter((s) => s === "done").length, "child item")} are done.`);
+      const doneKids = children.length + states.filter((s) => s === "done").length;
+      if (!states.includes("open")) add("canClose", it, doneKids === 1 ? "Its only child item is done." : `All ${plural(doneKids, "child item")} are done.`);
     }
     if (it.category === "Proposed" && open) {
       const started = children.filter((c) => c.category === "InProgress");

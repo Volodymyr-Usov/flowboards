@@ -23,10 +23,10 @@ import { addDependencyChecked, removeDependencyAny } from "./deps.ts";
 import { ChildCounts } from "./childcounts.ts";
 import { cleanTeams, conflictCounts, dependencies, dependencyPairs, dragsFor, teamKey } from "./roadmaplogic.ts";
 import type { Dependency, TeamRef } from "./roadmaplogic.ts";
-import type { Day, Span } from "./timeaxis.ts";
+import type { Day, Span } from "../core/timeaxis.ts";
 import {
   addMonths, dragDays, dragSpan, fmtDay, fmtSpan, monthStart, parts, planDay, planIso, quarterStart, ticks, todayDay, union, weekday,
-} from "./timeaxis.ts";
+} from "../core/timeaxis.ts";
 
 const START = "Microsoft.VSTS.Scheduling.StartDate";
 const TARGET = "Microsoft.VSTS.Scheduling.TargetDate";

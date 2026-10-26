@@ -11,6 +11,7 @@ import type { Occurrence, Schedule } from "../core/scheduler.ts";
 import { ClaimWatch, hasStory, isConflict, lastRun, pruneMark, runId, runOccurrence, runsToPrune } from "../core/schedrun.ts";
 import type { RunDoc, RunOutcome, RunStore } from "../core/schedrun.ts";
 import { cleanTemplates } from "../core/templates.ts";
+import { planIsoOfKey } from "../core/timeaxis.ts";
 import { collectionName, every, newDocId, TeamStore } from "../core/teamstore.ts";
 import { errorText, toast } from "../ui/kit.ts";
 import { textToHtml } from "../ui/sanitize.ts";
@@ -67,7 +68,8 @@ async function createStory(app: App, s: Schedule, occ: Occurrence, assignee: str
     "System.Tags": ["Scheduled", ...t.tags].join("; "),
   };
   const fs = ws.process.types[type]?.fields;
-  if (occ.due && (!fs || fs.includes(TARGET))) fields[TARGET] = occ.due;
+  // a planning date: local midnight, so Azure DevOps's own form shows the same day
+  if (occ.due && (!fs || fs.includes(TARGET))) fields[TARGET] = planIsoOfKey(occ.due) || occ.due;
   // the Writer, not app.actions: an error must reach the claim rules (refused or no answer), not only a message
   return app.actions.writer.create(type, fields);
 }

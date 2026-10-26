@@ -1,4 +1,4 @@
-// Day arithmetic shared by the Roadmap and the Calendar. No page code: covered by test/timeaxis.test.ts.
+// Day arithmetic and planning dates, shared by the Roadmap, the Calendar, the Scheduler, Health and the details panel. No page code: covered by test/timeaxis.test.ts.
 //
 // A day is a whole number: days since 1970-01-01, counted in UTC. Planning dates in Azure DevOps
 // (start, target, due) are dates without a time, saved as midnight of the person's time zone turned
@@ -30,6 +30,18 @@ export function planDay(iso: string | undefined | null): Day | null {
 export function planIso(day: Day): string {
   const p = parts(day);
   return new Date(p.y, p.m, p.d).toISOString();
+}
+
+/** The day of "2026-10-21", or null when it is not such a date. */
+export function parseDayKey(key: string | undefined | null): Day | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(key ?? "");
+  return m ? fromYmd(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : null;
+}
+
+/** The text Azure DevOps gets for the planning date "2026-10-21" (local midnight), or "" when it is not such a date. */
+export function planIsoOfKey(key: string | undefined | null): string {
+  const d = parseDayKey(key);
+  return d == null ? "" : planIso(d);
 }
 
 /** "2026-10-21" for a planning date (start, target, due), or "" when empty. */

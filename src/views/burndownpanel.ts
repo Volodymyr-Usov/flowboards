@@ -10,7 +10,7 @@ import { h, icon, svg } from "../ui/dom.ts";
 import { errorText, help, spinner } from "../ui/kit.ts";
 import { loadBurndown, MAX_TASKS } from "./sprintdata.ts";
 import type { BurndownPoint } from "./burndown.ts";
-import { dayKey, planDay, todayDay } from "./timeaxis.ts";
+import { dayKey, planDay, todayDay } from "../core/timeaxis.ts";
 
 const fmtNum = (n: number): string => (Math.round(n * 10) / 10).toLocaleString();
 const UTC_DATE: Intl.DateTimeFormatOptions = { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" };

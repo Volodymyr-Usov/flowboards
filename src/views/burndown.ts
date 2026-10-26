@@ -4,7 +4,7 @@
 //
 // A task counts on a day when it existed, sat in the sprint and was not closed.
 import { isUnder } from "../core/model.ts";
-import { dayKey, planDay, weekday } from "./timeaxis.ts";
+import { dayKey, planDay, weekday } from "../core/timeaxis.ts";
 
 /** A task as it is now: what decides the remaining work of a task closed without ever recording it. */
 export interface TaskNow {
