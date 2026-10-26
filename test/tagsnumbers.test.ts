@@ -2,7 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { REL } from "../src/api/api.ts";
 import type { ProcessInfo, WorkItem } from "../src/api/types.ts";
-import { duplicateTagGroups, runChecks, tagsAlike } from "../src/core/health.ts";
+import { childState, closableNow, closeCandidates, duplicateTagGroups, linkedChildren, runChecks, tagsAlike } from "../src/core/health.ts";
+import type { ChildState } from "../src/core/health.ts";
 
 test("tags that differ only in their numbers are not look-alikes", () => {
   assert.equal(tagsAlike("Q1-2026", "Q2-2026"), false);
@@ -47,11 +48,32 @@ function item(id: number, type: string, state: "New" | "Doing" | "Done", extra: 
 }
 const link = (rel: string, id: number) => ({ rel, url: `https://dev.azure.com/o/_apis/wit/workItems/${id}`, attributes: {} });
 
-test("could be closed: not suggested while a linked child is not loaded", () => {
-  const run = (items: WorkItem[]) => runChecks({ items, process: P, staleDays: 14, iterations: [], today: Date.parse("2026-10-21T00:00:00Z") })
+test("could be closed: not suggested until its links are read, nor while a linked child that is not loaded may be open", () => {
+  const run = (items: WorkItem[], outside?: Map<number, ChildState>) => runChecks({ items, process: P, staleDays: 14, iterations: [], today: Date.parse("2026-10-21T00:00:00Z"), outside })
     .filter((f) => f.checkId === "canClose").map((f) => f.itemId);
   const kid = item(2, "Story", "Done", { parent: 1 });
-  assert.deepEqual(run([item(1, "Feature", "Doing"), kid]), [1]);
+  // links not read yet: another team's child may be open
+  assert.deepEqual(run([item(1, "Feature", "Doing"), kid]), []);
   assert.deepEqual(run([item(1, "Feature", "Doing", { relations: [link(REL.child, 2)] }), kid]), [1]);
-  assert.deepEqual(run([item(1, "Feature", "Doing", { relations: [link(REL.child, 2), link(REL.child, 3)] }), kid]), []);
+  const two = item(1, "Feature", "Doing", { relations: [link(REL.child, 2), link(REL.child, 3)] });
+  // #3 is not loaded (another team's area): not read, open, done, or removed
+  assert.deepEqual(run([two, kid]), []);
+  assert.deepEqual(run([two, kid], new Map([[3, "open"]])), []);
+  assert.deepEqual(run([two, kid], new Map([[3, "done"]])), [1]);
+  assert.deepEqual(run([two, kid], new Map([[3, "gone"]])), [1]);
+});
+
+test("closable now: every linked child read again is done or removed; one that could not be read counts as open", () => {
+  const f = item(1, "Feature", "Doing", { relations: [link(REL.child, 2), link(REL.child, 3)] });
+  const kids = (...list: WorkItem[]) => new Map(list.map((k) => [k.id, k]));
+  assert.equal(closableNow(f, kids(item(2, "Story", "Done"), item(3, "Story", "Done"))), true);
+  assert.equal(closableNow(f, kids(item(2, "Story", "Done"), item(3, "Story", "Doing"))), false);
+  assert.equal(closableNow(f, kids(item(2, "Story", "Done"))), false, "#3 could not be read");
+  assert.equal(closableNow(f, kids(item(2, "Story", "Done"), { ...item(3, "Story", "Done"), category: "Removed" })), true);
+  assert.equal(closableNow(item(1, "Feature", "Doing", { relations: [] }), kids()), false, "no children at all");
+  assert.equal(closableNow(item(1, "Feature", "Doing"), kids(item(2, "Story", "Done"))), false, "links not read");
+  assert.equal(closableNow({ ...f, state: "Done", category: "Completed" }, kids(item(2, "Story", "Done"), item(3, "Story", "Done"))), false, "closed already");
+  assert.deepEqual(closeCandidates([f, item(2, "Story", "Done", { parent: 1 }), item(4, "Feature", "Doing"), item(5, "Feature", "Doing"), item(6, "Story", "Doing", { parent: 5 })]).map((w) => w.id), [1]);
+  assert.deepEqual(linkedChildren(f), [2, 3]);
+  assert.equal(childState(undefined), "open");
 });

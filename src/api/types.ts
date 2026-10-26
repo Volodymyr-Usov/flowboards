@@ -164,6 +164,8 @@ export interface QuerySpec {
   closedAfter?: string;
   closedBefore?: string;
   orderBy?: "changed" | "id" | "closed";
+  /** ISO moment: the items that matched then (WIQL ASOF), e.g. tasks that were in a sprint on a past day */
+  asOf?: string;
   /** at most this many ids (Azure DevOps answers at most 20,000) */
   top?: number;
 }
@@ -196,7 +198,10 @@ export interface PullRequest {
   sourceBranch?: string;
   targetBranch?: string;
   mergeStatus?: string;
-  reviewers: { person: Person; vote: number; isRequired?: boolean; isContainer?: boolean }[];
+  /** someone set it to complete on its own once the policies (build, checks) pass */
+  autoComplete?: boolean;
+  /** hasDeclined: the reviewer declined to review */
+  reviewers: { person: Person; vote: number; isRequired?: boolean; isContainer?: boolean; hasDeclined?: boolean }[];
   url: string;
   workItemIds?: number[];
   /** the text the author wrote (Azure DevOps may cut it short in lists) */

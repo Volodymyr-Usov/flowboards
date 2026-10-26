@@ -1,4 +1,4 @@
-// Day arithmetic shared by the Roadmap and the Calendar. No page code: covered by test/timeaxis.test.ts.
+// Day arithmetic and planning dates, shared by the Roadmap, the Calendar, the Scheduler, Health and the details panel. No page code: covered by test/timeaxis.test.ts.
 //
 // A day is a whole number: days since 1970-01-01, counted in UTC. Planning dates in Azure DevOps
 // (start, target, due) are dates without a time, saved as midnight of the person's time zone turned
@@ -17,7 +17,42 @@ export function planDay(iso: string | undefined | null): Day | null {
   if (!iso) return null;
   const t = Date.parse(iso);
   if (Number.isNaN(t)) return null;
+  // midnight of this browser's zone (what planIso writes, also beyond UTC+12): that local date
+  const d = new Date(t);
+  if (d.getHours() === 0 && d.getMinutes() === 0 && d.getSeconds() === 0) return localDay(d);
   return Math.floor((t + DAY_MS / 2) / DAY_MS);
+}
+
+/**
+ * The ISO text Azure DevOps gets for a planning date the person picked: midnight of that day in this
+ * browser's time zone, the way Azure DevOps's own date picker saves it (so its form shows the same day).
+ */
+export function planIso(day: Day): string {
+  const p = parts(day);
+  return new Date(p.y, p.m, p.d).toISOString();
+}
+
+/** The day of "2026-10-21", or null when it is not such a date. */
+export function parseDayKey(key: string | undefined | null): Day | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(key ?? "");
+  return m ? fromYmd(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : null;
+}
+
+/** The text Azure DevOps gets for the planning date "2026-10-21" (local midnight), or "" when it is not such a date. */
+export function planIsoOfKey(key: string | undefined | null): string {
+  const d = parseDayKey(key);
+  return d == null ? "" : planIso(d);
+}
+
+/** "2026-10-21" for a planning date (start, target, due), or "" when empty. */
+export function planKey(iso: string | undefined | null): string {
+  const d = planDay(iso);
+  return d == null ? "" : dayKey(d);
+}
+
+/** "2026-10-21": today in the local calendar. */
+export function todayKey(now: Date = new Date()): string {
+  return dayKey(todayDay(now));
 }
 
 /** The local calendar day of a moment (closed date, now). */
@@ -30,7 +65,7 @@ export function todayDay(now: Date = new Date()): Day {
   return localDay(now);
 }
 
-/** The ISO text Azure DevOps gets for a planning date: midnight UTC of that day. */
+/** Midnight UTC of a day. For a planning date written to Azure DevOps use planIso. */
 export function dayIso(day: Day): string {
   return new Date(day * DAY_MS).toISOString();
 }

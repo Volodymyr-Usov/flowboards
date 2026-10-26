@@ -2,8 +2,8 @@
 // sprint (in the team's capacity); a range that spans sprints is split, and parts outside every
 // sprint cannot be kept there. Covered by test/daysoff.test.ts.
 import type { Capacity, Iteration, Person } from "../api/types.ts";
-import type { Day } from "./timeaxis.ts";
-import { dayKey, planDay, weekday } from "./timeaxis.ts";
+import type { Day } from "../core/timeaxis.ts";
+import { dayKey, planDay, weekday } from "../core/timeaxis.ts";
 
 export interface Away {
   kind: "person" | "team";
@@ -83,7 +83,44 @@ export function removeRange(list: { start: string; end: string }[], start: Day, 
   return out;
 }
 
-export function eventDays(e: TeamEvent): { start: Day; end: Day } | null {
+/** Whole ranges of some days: sorted, touching days joined. */
+export function dayRanges(days: Day[]): { start: Day; end: Day }[] {
+  const out: { start: Day; end: Day }[] = [];
+  for (const d of [...new Set(days)].sort((a, b) => a - b)) {
+    const last = out[out.length - 1];
+    if (last && d === last.end + 1) last.end = d;
+    else out.push({ start: d, end: d });
+  }
+  return out;
+}
+
+/** The days of [start, end] that are off in a list of day-off ranges. */
+export function offDaysIn(list: { start: string; end: string }[], start: Day, end: Day): Day[] {
+  const out: Day[] = [];
+  for (let d = start; d <= end; d++) {
+    if (list.some((r) => { const s = planDay(r.start); const e = planDay(r.end); return s != null && e != null && d >= s && d <= e; })) out.push(d);
+  }
+  return out;
+}
+
+export interface DaysOffChange { op: "add" | "remove"; ranges: { start: Day; end: Day }[] }
+
+/**
+ * One change to a sprint's days off, applied to the list as it is now (read just before), and what it
+ * really changed: only those days are taken back by Undo, so a change someone made meanwhile stays.
+ */
+export function applyDaysOff(list: { start: string; end: string }[], change: DaysOffChange): { list: { start: string; end: string }[]; undo: DaysOffChange } {
+  let out = list;
+  const changed: Day[] = [];
+  for (const r of change.ranges) {
+    const off = new Set(offDaysIn(out, r.start, r.end));
+    for (let d = r.start; d <= r.end; d++) if (off.has(d) === (change.op === "remove")) changed.push(d);
+    out = change.op === "add" ? addRange(out, r.start, r.end) : removeRange(out, r.start, r.end);
+  }
+  return { list: out, undo: { op: change.op === "add" ? "remove" : "add", ranges: dayRanges(changed) } };
+}
+
+export function eventDays(e: TeamEvent):{ start: Day; end: Day } | null {
   const s = planDay(e.start);
   const t = planDay(e.end || e.start);
   return s == null || t == null ? null : { start: Math.min(s, t), end: Math.max(s, t) };

@@ -13,6 +13,7 @@ import { readFile, writeFile, mkdir, readdir, copyFile } from "node:fs/promises"
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { stripTypeScriptTypes } from "node:module";
+import { Script } from "node:vm";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const src = path.join(root, "src");
@@ -170,7 +171,16 @@ async function listCss(dir) {
 export async function build({ write = true } = {}) {
   const order = [];
   await loadModule(path.join(src, "main.ts"), new Set(), order, []);
+  // two files whose names differ only in punctuation ("a-b.ts", "a_b.ts") would get the same module name
+  const names = new Map();
+  for (const m of order) {
+    const n = modName(m.file);
+    if (names.has(n)) throw new Error(`${rel(m.file)} and ${rel(names.get(n))} get the same module name ${n}; rename one`);
+    names.set(n, m.file);
+  }
   const js = `(() => {\n"use strict";\n${order.map(wrap).join("\n")}\n})();\n`;
+  // the joined script must parse (a top-level await, for one, is not allowed inside the wrapper)
+  try { new Script(js, { filename: "dist/index.html (script)" }); } catch (e) { throw new Error(`The joined script does not parse: ${e.message}`); }
   const cssFiles = await listCss(src);
   const css = (await Promise.all(cssFiles.map((f) => readFile(f, "utf8"))))
     .map((c) => c.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\n\s*\n/g, "\n")).join("\n");

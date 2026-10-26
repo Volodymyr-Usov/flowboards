@@ -13,9 +13,9 @@ import { filterBar, peopleStrip, processFieldNames } from "../ui/filterbar.ts";
 import { pageBar } from "../ui/pagebar.ts";
 import { dialog, empty, failed, itemPicker, menu, segmented, spinner, toast, toggle, typeMark } from "../ui/kit.ts";
 import type { Edge } from "./graphlayout.ts";
-import { edgeKey, findCycles, layoutGraph, linkProblem as loopOrTwice, reach } from "./graphlayout.ts";
+import { edgeKey, findLoops, layoutGraph, linkProblem as loopOrTwice, reach } from "./graphlayout.ts";
 import { dependencyPairs } from "./roadmaplogic.ts";
-import { fmtDay, planDay } from "./timeaxis.ts";
+import { fmtDay, planDay } from "../core/timeaxis.ts";
 
 const W = 220;
 const H = 62;
@@ -273,8 +273,16 @@ export const depsView: View = {
           }
         }
       }
-      const cycles = findCycles([...nodes.keys()], edges);
-      for (const c of cycles) for (const id of c) nodes.get(id)!.problems.push(`In a loop: ${c.map((x) => "#" + x).join(" → ")} → #${c[0]}`);
+      // every item of a group that waits on itself is in a loop, also those off the one loop shown
+      const loops = findLoops([...nodes.keys()], edges);
+      const cycles = loops.map((l) => l.cycle);
+      for (const { cycle: c, members } of loops) {
+        for (const id of members) {
+          nodes.get(id)!.problems.push(c.includes(id)
+            ? `In a loop: ${c.map((x) => "#" + x).join(" → ")} → #${c[0]}`
+            : `In a loop with ${members.filter((x) => x !== id).map((x) => "#" + x).join(", ")}`);
+        }
+      }
       return { nodes, edges, bad, cycles };
     }
 

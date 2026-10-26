@@ -29,3 +29,11 @@ test("part titles do not pile up; the follow-up names what it follows", () => {
   assert.equal(baseTitle("(part 1)"), "(part 1)");
   assert.equal(followUpTitle({ id: 42, title: "Pay by card" }), "Follow-up for Pay by card (#42)");
 });
+
+test("split in half halves the estimate: the first part keeps the larger half", async () => {
+  const { halfEstimate } = await import("../src/ui/storyactions.ts");
+  assert.deepEqual(halfEstimate(8), [4, 4]);
+  assert.deepEqual(halfEstimate(5), [2.5, 2.5]);
+  assert.deepEqual(halfEstimate(1.5), [0.8, 0.7]);
+  assert.deepEqual(halfEstimate(0.3), [0.2, 0.1]);
+});

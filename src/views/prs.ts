@@ -36,9 +36,14 @@ interface Load {
   loading: boolean;
   noAccess: string[];
   failed: string[];
+  /** projects where Azure DevOps gave the most it gives (PR_CAP): older pull requests are left out */
+  capped: string[];
   error?: unknown;
   at: number;
 }
+
+/** The most pull requests read per project and tab (the newest first). */
+const PR_CAP = 1000;
 
 const RECENT_DAYS = 30;
 const CACHE_MS = 60_000;
@@ -80,10 +85,10 @@ function loadKey(app: App, scope: Scope, tab: Tab): string {
 /** Read the pull requests of a tab, one project at a time (at most 4 at once) for the whole organization. */
 function startLoad(app: App, scope: Scope, tab: Tab): Load {
   const key = loadKey(app, scope, tab);
-  const st: Load = { prs: [], done: 0, total: 0, loading: true, noAccess: [], failed: [], at: Date.now() };
+  const st: Load = { prs: [], done: 0, total: 0, loading: true, noAccess: [], failed: [], capped: [], at: Date.now() };
   memo.loads.set(key, st);
   const since = new Date(Date.now() - RECENT_DAYS * DAY).toISOString();
-  const opts = tab === "open" ? { status: "active" as const, top: 1000 } : { status: tab, minTime: since, top: 1000 };
+  const opts = tab === "open" ? { status: "active" as const, top: PR_CAP } : { status: tab, minTime: since, top: PR_CAP };
   const current = (): boolean => memo.loads.get(key) === st;
   void (async () => {
     try {
@@ -95,6 +100,7 @@ function startLoad(app: App, scope: Scope, tab: Tab): Load {
         if (!current()) return;
         st.done = done;
         if (res.value) {
+          if (res.value.length >= PR_CAP) st.capped.push(name);
           for (const pr of res.value) {
             if (seen.has(pr.id)) continue;
             if (tab !== "open" && pr.closed && Date.parse(pr.closed) < Date.parse(since)) continue;
@@ -356,6 +362,11 @@ export const prsView: View = {
       }
       if (st.noAccess.length) parts.push(h("span.warn-text", { title: st.noAccess.join(", ") }, ` · No access to ${st.noAccess.length} project${st.noAccess.length === 1 ? "" : "s"}`));
       if (st.failed.length) parts.push(h("span.err", { title: st.failed.join("\n") }, ` · ${st.failed.length} project${st.failed.length === 1 ? "" : "s"} could not be read`));
+      // Azure DevOps gives at most PR_CAP per project: say so, as the counts and filters miss the older ones
+      if (st.capped.length) {
+        parts.push(h("span.warn-text", { title: `Only the newest ${PR_CAP.toLocaleString()} pull requests were read in: ${st.capped.join(", ")}. Older ones are not shown or counted, also not by the filters.` },
+          memo.scope === "all" ? ` · Only the newest ${PR_CAP.toLocaleString()} in ${st.capped.length} project${st.capped.length === 1 ? "" : "s"}` : ` · Only the newest ${PR_CAP.toLocaleString()} shown`));
+      }
       replace(status, parts);
     }
 
@@ -530,10 +541,12 @@ export const prsView: View = {
       const order = { rejected: 0, waiting: 1, approved: 2, suggestions: 3, none: 4 };
       const revs = [...pr.reviewers].map((r) => ({ ...r, person: shownPerson(r.person) }))
         .sort((a, b) => order[voteKind(a.vote)] - order[voteKind(b.vote)] || Number(Boolean(b.isRequired)) - Number(Boolean(a.isRequired)));
-      const names = revs.map((r) => `${r.person.displayName}${r.isRequired ? " (required)" : ""}: ${VOTE_LABEL[voteKind(r.vote)]}`).join("; ");
+      // a reviewer who declined and did not vote shows as declined, not as "no vote yet"
+      const voteText = (r: PullRequest["reviewers"][number]): string => r.hasDeclined && !r.vote ? "Declined to review" : VOTE_LABEL[voteKind(r.vote)];
+      const names = revs.map((r) => `${r.person.displayName}${r.isRequired ? " (required)" : ""}: ${voteText(r)}`).join("; ");
       return h("td", null, h("div.prs-revs", { "data-xl": names }, revs.map((r) => {
         const k = voteKind(r.vote);
-        const title = `${r.person.displayName}${r.isContainer ? " (group)" : ""}${r.isRequired ? " (required)" : ""}: ${VOTE_LABEL[k]}`;
+        const title = `${r.person.displayName}${r.isContainer ? " (group)" : ""}${r.isRequired ? " (required)" : ""}: ${voteText(r)}`;
         return h(`span.prs-rev${r.isRequired ? ".req" : ""}`, { title },
           avatar(app.api, r.person, 24, { title }),
           k === "none" ? null : h(`span.prs-vote.${k}`, { "aria-hidden": "true" }, k === "approved" || k === "suggestions" ? "✓" : k === "waiting" ? "!" : "✕"));
@@ -556,7 +569,10 @@ export const prsView: View = {
         return h("td", null, h("span.prs-wait", { title: `Waiting for a vote from ${names.join(", ")}` }, people.slice(0, 3).map((p) => avatar(app.api, p, 20)),
           h("span.small", null, namesText(names))));
       }
-      return h("td", null, h("span.warn-text.small", { title: "Nobody was asked to review this pull request" }, "No reviewer"));
+      if (w.kind === "policies") {
+        return h("td", null, h("span.prs-wait.done", { title: "Approved and set to complete on its own: waiting for the build and the other branch checks" }, icon("clock", 14), "Checks (auto-complete)"));
+      }
+      return h("td", null, h("span.warn-text.small", { title: pr.reviewers.length ? "Every reviewer declined to review this pull request" : "Nobody was asked to review this pull request" }, "No reviewer"));
     }
 
     function mergeCell(pr: PullRequest): HTMLElement {

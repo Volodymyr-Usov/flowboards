@@ -1,5 +1,6 @@
-// Estimate: planning poker. The team picks a story together, everyone votes in secret, all votes
+// Estimate: planning poker. The team picks a story together, everyone votes face down, all votes
 // show at once, and the agreed number is written to the story's estimate field in Azure DevOps.
+// Face down is on screen only: the votes are in shared storage that people of the organization can read.
 // The session, the votes and who is here live in the extension's shared storage for the team and
 // are read again every few seconds while the page is open.
 import type { WorkItem } from "../api/types.ts";
@@ -16,6 +17,8 @@ import type { Card, PokerDoc, PokerPresence, PokerSession, PokerVote } from "./p
 import { CARD_LABEL, DECK, hereId, present, result, voteId, wideSpread } from "./pokerlogic.ts";
 
 const POLL_MS = 2500;
+/** said where votes are "secret": face down on screen only */
+const POKER_PRIVACY = "Votes are kept in the organization's extension storage: face down on screen until shown, but people in the organization can read them by technical means.";
 const HERE_MS = 15000;
 type Filter = "unestimated" | "sprint" | "all";
 
@@ -24,7 +27,7 @@ export const pokerView: View = {
   title: "Estimate",
   icon: "poker",
   group: "plan",
-  about: "Planning poker: pick a story for everyone, vote in secret, show the votes at once, then save the agreed estimate to the story.",
+  about: "Planning poker: pick a story for everyone, vote face down, show the votes at once, then save the agreed estimate to the story.",
   mount(el, app) {
     const ws = app.ws;
     const me = ws.api.ctx.me;
@@ -192,6 +195,7 @@ export const pokerView: View = {
           h("span.small.muted", null, `Round ${s.round}: ${votes.length} of ${everyone.length || 1} voted`),
           !s.revealed && !ro ? h("button.btn.primary", { title: "Show every vote at once", disabled: !votes.length, onclick: () => void reveal() }, "Show votes") : null,
           help("Votes stay face down until someone clicks \"Show votes\". Then everyone sees them at the same moment. Talk about the highest and lowest, vote again if needed, and save the agreed number.")),
+        !s.revealed ? h("p.small.muted.poker-privacy", null, POKER_PRIVACY) : null,
         table, deck, outcome);
     }
 

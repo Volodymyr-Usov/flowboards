@@ -26,33 +26,40 @@ export const VOTE_LABEL: Record<VoteKind, string> = {
 };
 
 export interface WaitingOn {
-  /** reviewers: the listed reviewers must vote; author: the author must act (see why); none: nobody asked to review */
-  kind: "reviewers" | "author" | "none";
+  /**
+   * reviewers: the listed reviewers must vote; author: the author must act (see why); policies: approved and set to
+   * complete on its own, waiting for the build and other checks; none: nobody asked to review
+   */
+  kind: "reviewers" | "author" | "policies" | "none";
   people: Person[];
   /** why the author: changes asked for, merge conflicts, or approved and ready to complete */
   why?: "changes" | "conflicts" | "complete";
 }
 
+/** A reviewer who declined is not waited on, unless the review is required. */
+const counts = (r: PullRequest["reviewers"][number]): boolean => !r.hasDeclined || !!r.isRequired;
+
 /**
- * Who the pull request waits on:
+ * Who the pull request waits on (reviewers who declined do not count, unless required):
  * - the author, when any reviewer voted "waiting" or "rejected";
  * - the author, when the merge has conflicts or failed;
  * - else the required reviewers who have not voted;
  * - else, when nobody has approved yet, every reviewer who has not voted;
- * - else, once approved, the author (to complete it);
+ * - else, once approved: the build and other checks when it is set to complete on its own, else the author (to complete it);
  * - nobody when no one was asked to review.
  */
 export function waitingOn(pr: PullRequest): WaitingOn {
   const author = (why: WaitingOn["why"]): WaitingOn => ({ kind: "author", people: [pr.createdBy], why });
-  if (pr.reviewers.some((r) => r.vote < 0)) return author("changes");
+  const reviewers = pr.reviewers.filter(counts);
+  if (reviewers.some((r) => r.vote < 0)) return author("changes");
   if (pr.mergeStatus === "conflicts" || pr.mergeStatus === "failure") return author("conflicts");
-  const required = pr.reviewers.filter((r) => r.isRequired && r.vote === 0);
+  const required = reviewers.filter((r) => r.isRequired && r.vote === 0);
   if (required.length) return { kind: "reviewers", people: required.map((r) => r.person) };
-  if (!pr.reviewers.some((r) => r.vote > 0)) {
-    const open = pr.reviewers.filter((r) => r.vote === 0);
+  if (!reviewers.some((r) => r.vote > 0)) {
+    const open = reviewers.filter((r) => r.vote === 0);
     return open.length ? { kind: "reviewers", people: open.map((r) => r.person) } : { kind: "none", people: [] };
   }
-  return author("complete");
+  return pr.autoComplete ? { kind: "policies", people: [] } : author("complete");
 }
 
 /** A group's name without its scope: "[Project]\Team" -> "Team". */
@@ -71,9 +78,9 @@ export function namesText(names: string[], max = 2): string {
   return names.length <= max ? names.join(", ") : `${names.slice(0, max).join(", ")} +${names.length - max}`;
 }
 
-/** True when the person is a reviewer who has not voted yet. */
+/** True when the person is a reviewer who has not voted yet (and did not decline). */
 export function needsReviewBy(pr: PullRequest, me: Person): boolean {
-  return pr.reviewers.some((r) => r.vote === 0 && samePerson(r.person, me));
+  return pr.reviewers.some((r) => r.vote === 0 && counts(r) && samePerson(r.person, me));
 }
 
 export function isAuthor(pr: PullRequest, me: Person): boolean {

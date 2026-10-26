@@ -2,12 +2,13 @@
 // The checks themselves are pure functions in core/health.ts; this file draws them and offers quick fixes.
 import type { View } from "../app/context.ts";
 import type { WorkItem } from "../api/types.ts";
-import type { CheckInfo, CustomCheck, CustomFix, Finding, Severity } from "../core/health.ts";
-import { CHECK_BY_ID, CHECKS, findingKey, firstStateIn, runChecks, runCustomChecks } from "../core/health.ts";
+import type { CheckInfo, ChildState, CustomCheck, CustomFix, Finding, Severity } from "../core/health.ts";
+import { CHECK_BY_ID, CHECKS, childState, closableNow, closeCandidates, findingKey, firstStateIn, linkedChildren, runChecks, runCustomChecks } from "../core/health.ts";
 import type { Filter } from "../core/filters.ts";
 import { BASE_PROPS, fieldProps } from "../core/filters.ts";
 import { textMatch } from "../core/filters.ts";
-import { inTeamAreas, isOpen, levelOf, parentLevel } from "../core/model.ts";
+import { isOpen, levelOf, parentLevel } from "../core/model.ts";
+import { ofTeam } from "../core/scope.ts";
 import { prefs } from "../core/settings.ts";
 import { h, icon, svg } from "../ui/dom.ts";
 import { keepFocus } from "../ui/focuskeep.ts";
@@ -69,15 +70,78 @@ export const healthView: View = {
     ];
     const checkOf = (id: string): Check | undefined => checks().find((c) => c.id === id);
     const allProps = () => new Map([...BASE_PROPS, ...fieldProps(ws.items.values(), processFieldNames(ws.process))].map((p) => [p.id, p]));
-    const inScope = (w: WorkItem | undefined): boolean => !w || state.scope === "all" || inTeamAreas(w.area, ws.settings.areas);
+    const inScope = (w: WorkItem | undefined): boolean => !w || state.scope === "all" || ofTeam(ws, w);
     const compute = (): Finding[] => {
       const on = off();
       const built = runChecks({
         items: ws.items.values(), process: ws.process, staleDays: app.settings.shared.staleDays,
         iterations: ws.iterations, backlogRoot: ws.settings.backlogIteration ?? ws.project, today: Date.now(),
+        outside: new Map([...outside].map(([id, o]) => [id, o.state])),
       }).filter((f) => !on.has(f.checkId));
       return [...built, ...runCustomChecks(ws.items.values(), customs(), allProps())].filter((f) => inScope(ws.get(f.itemId)));
     };
+
+    // ---------- "Could be closed": read the links first ----------
+    // An item is listed only once its links are read and every child that is not loaded (another team's area,
+    // closed long ago) was read too: a child that cannot be read counts as open.
+    let alive = true;
+    /** linked children that are not loaded, as last read, and when */
+    const outside = new Map<number, { state: ChildState; at: number }>();
+    /** the revision whose links were asked for (an item whose answer did not come is not asked again and again) */
+    const linksAsked = new Map<number, number>();
+    const links = { busy: false, retryAt: 0, waiting: 0 };
+    const OUTSIDE_TTL = 10 * 60_000;
+    const linkNote = h("span.small.muted.hl-links", { role: "status" });
+    const paintLinkNote = (): void => {
+      linkNote.textContent = links.waiting ? ` · Checking the links of ${links.waiting} item${links.waiting === 1 ? "" : "s"} for "${CHECK_BY_ID.canClose.title}"…` : "";
+    };
+    /** Read the outside children's states; one that comes back missing (deleted, no access) counts as open. */
+    const readOutside = async (ids: number[]): Promise<void> => {
+      const got = new Map((await app.api.items(ws.project, ids)).map((w) => [w.id, w]));
+      const at = Date.now();
+      for (const id of ids) outside.set(id, { state: childState(got.get(id)), at });
+    };
+    async function checkLinks(): Promise<void> {
+      if (links.busy || off().has("canClose") || Date.now() < links.retryAt) return;
+      const cands = closeCandidates(ws.items.values()).filter((w) => inScope(w));
+      const need = cands.filter((w) => !w.relations && linksAsked.get(w.id) !== w.rev);
+      const now = Date.now();
+      const kidsToRead = (): number[] => [...new Set(cands.flatMap((w) => ws.get(w.id)?.relations ? linkedChildren(ws.get(w.id)!) : []))]
+        .filter((id) => !ws.items.has(id) && (outside.get(id)?.at ?? 0) < now - OUTSIDE_TTL);
+      if (!need.length && !kidsToRead().length) return;
+      links.busy = true;
+      links.waiting = need.length;
+      paintLinkNote();
+      try {
+        for (const w of need) linksAsked.set(w.id, w.rev);
+        if (need.length) await ws.withRelations(need.map((w) => w.id));
+        const ids = kidsToRead();
+        for (let i = 0; i < ids.length; i += 200) await readOutside(ids.slice(i, i + 200));
+      } catch {
+        // try again in a minute; until then those items are not listed
+        for (const w of need) linksAsked.delete(w.id);
+        links.retryAt = Date.now() + 60_000;
+      } finally {
+        links.busy = false;
+        links.waiting = 0;
+      }
+      if (alive) draw();
+    }
+
+    /**
+     * Just before closing: read the items and every linked child again, and keep only the items whose
+     * children are all done now (also the children of other teams). Says why the others are left out.
+     */
+    async function stillClosable(ids: number[]): Promise<number[]> {
+      const fresh = await app.api.items(ws.project, ids, { relations: true });
+      const kidIds = [...new Set(fresh.flatMap(linkedChildren))];
+      const kids = new Map<number, WorkItem>();
+      for (let i = 0; i < kidIds.length; i += 200) for (const k of await app.api.items(ws.project, kidIds.slice(i, i + 200))) kids.set(k.id, k);
+      const at = Date.now();
+      for (const id of kidIds) if (!ws.items.has(id)) outside.set(id, { state: childState(kids.get(id)), at });
+      return fresh.filter((f) => closableNow(f, kids)).map((f) => f.id);
+    }
+    const closeLater = (n: number): string => `${n === 1 ? "It has" : `${n} items have`} a child that is still open (maybe in another team's area) or could not be read.`;
 
     // ---------- quick fixes ----------
 
@@ -130,7 +194,15 @@ export const healthView: View = {
         case "close": {
           const st = firstStateIn(ws.process, it.type, "Completed");
           if (!st) return open();
-          return h("button.btn.small", { title: `Move to ${st}`, onclick: () => void app.actions.move(it.id, { state: st }) }, "Close");
+          return h("button.btn.small", {
+            title: `Move to ${st} (its children are read again first)`,
+            onclick: async () => {
+              let ok: number[];
+              try { ok = await stillClosable([it.id]); } catch (e) { toast(`Could not check its children: ${(e as Error).message}`, { kind: "error" }); return; }
+              if (!ok.length) { toast(`#${it.id} was not closed. ${closeLater(1)}`, { kind: "error" }); draw(); return; }
+              await app.actions.move(it.id, { state: st });
+            },
+          }, "Close");
         }
         case "start": {
           const st = firstStateIn(ws.process, it.type, "InProgress");
@@ -244,7 +316,8 @@ export const healthView: View = {
           h("span.n", null, `${clean} of ${total}`),
           h("span.l", null, "items have no findings", " ", help(`Only the team's loaded work is checked: open items and those closed in the last ${ws.opts.closedDays} days. Stale means in progress and unchanged for more than ${app.settings.shared.staleDays} days (set in Settings).`))),
         h("div.hl-bar", { title: `${pct}% without findings` }, h("i", { style: { width: pct + "%" } })),
-        h("div.small.muted", null, `${active.length} findings on ${withFindings} items`, hiddenCount ? ` · ${hiddenCount} hidden in this browser` : ""));
+        h("div.small.muted", null, `${active.length} findings on ${withFindings} items`, hiddenCount ? ` · ${hiddenCount} hidden in this browser` : "", linkNote));
+      paintLinkNote();
 
       const chips = h("div.hl-chips", null,
         checks().map((c) => {
@@ -298,6 +371,8 @@ export const healthView: View = {
       const back = keepFocus(body);
       body.replaceChildren(h("div.hl-top", null, score, chips), h("div.hl-groups", null, groups));
       back(body.querySelector<HTMLElement>("[data-fk=checks]"));
+      // items that may be closable are listed once their links are read
+      void checkLinks();
     }
 
     // ---------- the team's own checks ----------
@@ -446,10 +521,20 @@ export const healthView: View = {
       const ids = [...new Set(fs.filter((f) => !ignored.has(findingKey(f))).map((f) => f.itemId))];
       const assign = what.startsWith("Assign");
       const run = async (who?: { uniqueName: string; displayName: string }): Promise<void> => {
-        const steps = ids.map((id) => ({ id, run: stepFor(c, id, who?.uniqueName) })).filter((s) => s.run);
+        let steps = ids.map((id) => ({ id, run: stepFor(c, id, who?.uniqueName) })).filter((s) => s.run);
         if (!steps.length) { toast("Nothing here can be fixed in one go: open the items one by one.", { kind: "error" }); return; }
+        // closing: the children are read again first, also those in other teams' areas
+        let kept = "";
+        if (c.builtin?.id === "canClose") {
+          let ok: Set<number>;
+          try { ok = new Set(await stillClosable(steps.map((s) => s.id))); } catch (e) { toast(`Could not check the children: ${(e as Error).message}`, { kind: "error" }); return; }
+          const left = steps.length - steps.filter((s) => ok.has(s.id)).length;
+          steps = steps.filter((s) => ok.has(s.id));
+          if (left) kept = ` ${left} ${left === 1 ? "is" : "are"} left out: ${closeLater(left)}`;
+          if (!steps.length) { toast(`Nothing was closed.${kept}`, { kind: "error" }); draw(); return; }
+        }
         const doing = assign ? `Assign ${steps.length} items to ${who!.displayName}` : `${what} ${steps.length} items`;
-        if (!(await confirm(`${doing}?`, `Every item "${c.title}" finds now${steps.length < ids.length ? ` that can be changed here (${ids.length - steps.length} cannot)` : ""}. One Undo in the message puts them all back.`, "Do it"))) return;
+        if (!(await confirm(`${doing}?`, `Every item "${c.title}" finds now${steps.length < ids.length && !kept ? ` that can be changed here (${ids.length - steps.length} cannot)` : ""}.${kept} One Undo in the message puts them all back.`, "Do it"))) return;
         // not disabled while it runs (that would drop the focus): a second click waits for the first
         fixing.add(c.id);
         try {
@@ -481,6 +566,7 @@ export const healthView: View = {
     return {
       exportSheets: () => { const sh = sheet(); return sh.rows.length > 1 ? [sh] : null; },
       update() { fb.refresh(); draw(); },
+      unmount() { alive = false; },
       select(id) {
         state.selected = id;
         for (const r of el.querySelectorAll<HTMLElement>("[data-id]")) r.classList.toggle("sel", Number(r.dataset.id) === id);

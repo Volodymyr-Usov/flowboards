@@ -15,12 +15,12 @@ import { sortable } from "../ui/sortable.ts";
 import { avatar, dialog, empty, errorText, help, spinner, stateMark, toast, toggle, typeMark } from "../ui/kit.ts";
 import { burndownPanel } from "./burndownpanel.ts";
 import { dayOffDialog } from "./calendar.ts";
-import { dayKey, planDay, todayDay } from "./timeaxis.ts";
+import { dayKey, planDay, todayDay } from "../core/timeaxis.ts";
 import { goalId, goalStore, openSprintReport } from "./sprintreport.ts";
 import type { Goal } from "./sprintreport.ts";
-import { canSplit, cleanupSteps, dropNeighbors, escapeHtml, nextSprint, sprintOver, tasksInSprint, workingDaysLeft } from "./sprintlogic.ts";
+import { canSplit, cleanupSteps, dropNeighbors, escapeHtml, guardSteps, nextSprint, sprintOver, tasksInSprint, workingDaysLeft } from "./sprintlogic.ts";
 import { sprintVelocity } from "./sprintdata.ts";
-import type { CleanupChoice, CleanupMode } from "./sprintlogic.ts";
+import type { CleanupChoice, CleanupMode, CleanupStep } from "./sprintlogic.ts";
 
 type Col = "backlog" | "sprint";
 
@@ -262,8 +262,15 @@ export const sprintView: View = {
     function drawCleanup(): void {
       const next = nextOf();
       const n = unfinished().length;
-      cleanupBtn.hidden = app.actions.readOnly || !sprintOver(sprint, today()) || !next || !n;
-      if (cleanupBtn.hidden || !next) return;
+      cleanupBtn.hidden = app.actions.readOnly || !sprintOver(sprint, today()) || !n;
+      if (cleanupBtn.hidden) return;
+      if (!next) {
+        // said, not hidden: the button comes back once the next sprint exists
+        cleanupBtn.textContent = `Move unfinished (${n})`;
+        cleanupBtn.title = "Make the next sprint in Azure DevOps first";
+        cleanupBtn.disabled = true;
+        return;
+      }
       cleanupBtn.textContent = `Move unfinished (${n}) to ${next.name}`;
       cleanupBtn.title = `${sprint.name} has ${sprint.finish && Date.parse(sprint.finish.slice(0, 10)) < Date.parse(today()) ? "ended" : "its last day today"}: choose which unfinished stories move to ${next.name}, or split a story so its finished work stays here`;
       cleanupBtn.disabled = !!moving;
@@ -348,7 +355,11 @@ export const sprintView: View = {
       const from = sprint;
       const copies = new Map<string, number>(); // step ref -> id of the copy made
       const has = (type: string, field: string): boolean => { const f = ws.process.types[type]?.fields; return !f || f.includes(field); };
-      const jobs = cleanupSteps(choices, next.path).map((s): { label: string; run: (w: Writer) => Promise<WriteResult> } => {
+      const steps = cleanupSteps(choices, next.path);
+      // a story that did not move keeps its tasks; nothing goes under a copy that was not made
+      const guarded = guardSteps<Writer, WriteResult>(steps, (s, w) => jobOf(s).run(w), (s) => ({ item: ws.get(s.kind === "copy" ? s.from : s.id)! }));
+      const jobs = steps.map((s, i) => ({ label: jobOf(s).label, run: guarded[i] }));
+      function jobOf(s: CleanupStep): { label: string; run: (w: Writer) => Promise<WriteResult> } {
         if (s.kind === "iteration") return { label: `#${s.id} to ${next.name}`, run: (w) => w.setFields(s.id, [{ field: "System.IterationPath", value: s.path }]) };
         if (s.kind === "reparent") {
           return {
@@ -388,7 +399,7 @@ export const sprintView: View = {
             return { item, undo: gone ? undo : undefined };
           },
         };
-      });
+      }
       moving = "Cleaning up…";
       movingNote.textContent = moving;
       drawCleanup();
@@ -538,9 +549,11 @@ export const sprintView: View = {
       return out;
     }
 
+    /** The sprint's last day is before today: no hours are left, so no load is "too much". */
+    const ended = (): boolean => { const e = planDay(sprint.finish); return e != null ? e < todayDay() : sprint.timeFrame === "past"; };
     const loadClass = (assignedH: number, availableH: number, hasCap: boolean): string => {
       const ratio = availableH > 0 ? assignedH / availableH : assignedH > 0 ? Infinity : 0;
-      return !hasCap ? "none" : ratio > 1 ? "bad" : ratio >= 0.9 ? "warn" : "ok";
+      return !hasCap || ended() ? "none" : ratio > 1 ? "bad" : ratio >= 0.9 ? "warn" : "ok";
     };
 
     function drawLoad(): void {
@@ -693,7 +706,7 @@ export const sprintView: View = {
         class: [selected.has(w.id) && "sel", openId === w.id && "open", !isOpen(w) && "done", drag?.started && drag.ids.includes(w.id) && "dragged"],
         tabindex: 0, role: "option", "aria-selected": String(selected.has(w.id)),
         dataset: { id: w.id, col, ...(movable ? { drag: "1" } : {}) },
-        title: movable ? `Click to open; Ctrl or Shift + click to select several; drag to move${col === "sprint" ? " or to change the order" : ""}` : "Click to open",
+        title: movable ? `Click to open; Ctrl or Shift + click to select several; drag to move${col === "sprint" ? " or to change the order (Alt+Up or Alt+Down with the keyboard)" : ""}` : "Click to open",
       },
         movable ? h("span.sp-grip", { "aria-hidden": "true" }, icon("drag", 14)) : h("span.sp-grip"),
         typeMark(ws, w.type),
@@ -841,6 +854,7 @@ export const sprintView: View = {
     // ---------- selection, click, drag ----------
     interface Drag { ids: number[]; from: Col; x: number; y: number; started: boolean; ghost: HTMLElement | null; over: Col | null; rowId: number; spot: { prev: number; next: number } | null }
     let drag: Drag | null = null;
+    let focusAfter: number | null = null; // a row reordered with the keyboard: focused again after the redraw
     const dropLine = h("div.sp-drop-line", { "aria-hidden": "true", hidden: true });
     let lastPt = { x: 0, y: 0 };
     let scrollRaf = 0;
@@ -997,7 +1011,8 @@ export const sprintView: View = {
       for (const r of el.querySelectorAll<HTMLElement>(".sp-row.dragged")) r.classList.remove("dragged");
       const was = drag;
       drag = null;
-      if (was?.started) { drawStats(); drawSprint(); drawLoad(); }
+      if (drawLater) { drawLater = false; redraw(); }
+      else if (was?.started) { drawStats(); drawSprint(); drawLoad(); }
     };
 
     const onUp = (e: PointerEvent): void => {
@@ -1022,6 +1037,16 @@ export const sprintView: View = {
       if (e.key === "Enter") { e.preventDefault(); app.openItem(id); }
       else if (e.key === " " && row.dataset.drag) { e.preventDefault(); clickRow(id, row.dataset.col as Col, { ctrlKey: true, metaKey: false, shiftKey: false }); }
       else if (e.key === "Escape" && selected.size) { selected.clear(); paintSelection(); }
+      else if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown") && row.dataset.drag && row.dataset.col === "sprint") {
+        // Alt+Up / Alt+Down: one place up or down in the sprint's order, without a mouse
+        e.preventDefault();
+        const order = [...colSprint.querySelectorAll<HTMLElement>(".sp-story > .sp-row")].map((r) => Number(r.dataset.id));
+        const i = order.indexOf(id);
+        const spot = i < 0 ? null : dropNeighbors(order, [id], e.key === "ArrowUp" ? i - 1 : i + 1);
+        if (!spot || moving) return;
+        focusAfter = id;
+        void reorderItems([id], spot);
+      }
     };
 
     el.addEventListener("pointerdown", onDown);
@@ -1046,8 +1071,12 @@ export const sprintView: View = {
       // the burndown reads the sprint's tasks day by day: after the rest is on screen
       const it = sprint;
       setTimeout(() => { if (alive) burn.show(it); }, 50);
+      // the row moved with the keyboard keeps the focus
+      if (focusAfter != null) { colSprint.querySelector<HTMLElement>(`.sp-row[data-id="${focusAfter}"]`)?.focus(); focusAfter = null; }
     }
-    const redraw = rafThrottle(() => { if (alive && !drag?.started) draw(); });
+    // a change that comes in while dragging is drawn when the drag ends (dropped or cancelled), not lost
+    let drawLater = false;
+    const redraw = rafThrottle(() => { if (!alive) return; if (drag?.started) { drawLater = true; return; } draw(); });
 
     draw();
 

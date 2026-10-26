@@ -3,6 +3,7 @@
 // every occurrence that is due and not made yet. Dates are plain "YYYY-MM-DD" days in the browser's own
 // calendar, so nothing here depends on a time zone or on daylight saving.
 import type { Iteration } from "../api/types.ts";
+import { planKey } from "./timeaxis.ts";
 import type { ChildTemplate } from "./templates.ts";
 import { cleanTemplates } from "./templates.ts";
 
@@ -24,7 +25,7 @@ export type Trigger =
   | { kind: "period"; at: "month-start" | "month-end" | "quarter-start" | "quarter-end"; offsetDays: number };
 
 export interface Template {
-  /** the story's title; {date} {day} {week} {month} {quarter} {year} {sprint} are replaced */
+  /** the story's title; {date} {day} {week} {weekyear} {month} {quarter} {year} {sprint} are replaced */
   title: string;
   /** plain text; blank lines and "- " lists are kept */
   description: string;
@@ -48,18 +49,26 @@ export interface Schedule {
   enabled: boolean;
   trigger: Trigger;
   template: Template;
-  /** the day it was made: nothing earlier than this is made afterwards */
+  /** the day it was made: the count of "every N weeks, months or sprints" starts here */
   created: string;
+  /**
+   * The first day it makes stories: the day it was made, its trigger last changed, or it was turned back on.
+   * Nothing earlier is made afterwards, so an edit does not fill in the past week. Older documents: `created`.
+   */
+  activeFrom: string;
   by?: string;
 }
 
 /** One time a schedule is due. `date` is when the story is made; `key` is the same for the same occurrence everywhere. */
 export interface Occurrence {
+  /** the date, for most triggers; the sprint and its point for sprint triggers; the target date for an outlook */
   key: string;
+  /** the key older versions used (the day it was made), when it differs: a run record under it still counts */
+  legacyKey?: string;
   date: string;
   /** an outlook's target date */
   due?: string;
-  sprint?: { name: string; path: string; start: string; finish: string };
+  sprint?: { id?: string; name: string; path: string; start: string; finish: string };
 }
 
 export interface ScheduleContext { iterations: Iteration[] }
@@ -103,27 +112,48 @@ export function isoWeek(s: string): number {
   return Math.floor((thursday - jan1) / 7) + 1;
 }
 
+/** The year an ISO week belongs to (30 December 2024 is in week 1 of 2025): the year of the week's Thursday. */
+export function isoWeekYear(s: string): number {
+  const n = dayNo(s);
+  return Number(ymd(n - ((n + 4 + 6) % 7) + 3).slice(0, 4));
+}
+
 // ---------- when ----------
 
 const sprintsOf = (ctx: ScheduleContext) => ctx.iterations
+  .map((i) => ({ id: i.id, name: i.name, path: i.path, start: planKey(i.start), finish: planKey(i.finish) }))
   .filter((i) => i.start && i.finish)
-  .map((i) => ({ name: i.name, path: i.path, start: i.start!.slice(0, 10), finish: i.finish!.slice(0, 10) }))
   .sort((a, b) => a.start.localeCompare(b.start));
 
 /**
  * Every occurrence of a schedule made on a day from `from` to `to` (both included), earliest first.
- * Nothing before the day the schedule was made.
+ * Nothing before the schedule's first day (`activeFrom`).
  */
 export function occurrences(s: Schedule, ctx: ScheduleContext, from: string, to: string): Occurrence[] {
-  const lo = dayNo(from > s.created ? from : s.created);
+  const first = s.activeFrom || s.created;
+  const lo = dayNo(from > first ? from : first);
   const hi = dayNo(to);
   if (hi < lo) return [];
   const t = s.trigger;
   const out: Occurrence[] = [];
-  const add = (n: number, extra: Partial<Occurrence> = {}): void => { if (n >= lo && n <= hi) out.push({ key: ymd(n), date: ymd(n), ...extra }); };
+  const add = (n: number, extra: Partial<Occurrence> = {}): void => {
+    if (n < lo || n > hi) return;
+    const o: Occurrence = { key: ymd(n), date: ymd(n), ...extra };
+    if (o.legacyKey === o.key) delete o.legacyKey;
+    out.push(o);
+  };
   switch (t.kind) {
     case "date": if (isDay(t.date)) add(dayNo(t.date)); break;
-    case "outlook": if (isDay(t.date)) add(dayNo(t.date) - Math.max(0, Math.round(t.leadDays)), { due: t.date }); break;
+    case "outlook": {
+      if (!isDay(t.date)) break;
+      // the story is about the target date, so that is its key. It is made `leadDays` before, or on the
+      // schedule's first day when it only started after that (still worth making while the date is ahead)
+      const target = dayNo(t.date);
+      const appear = target - Math.max(0, Math.round(t.leadDays));
+      const start = dayNo(first);
+      if (start <= target) add(Math.max(appear, start), { key: t.date, legacyKey: ymd(appear), due: t.date });
+      break;
+    }
     case "weekly": {
       const every = Math.max(1, Math.round(t.everyWeeks));
       const anchor = mondayOf(dayNo(s.created));
@@ -144,12 +174,18 @@ export function occurrences(s: Schedule, ctx: ScheduleContext, from: string, to:
     }
     case "sprint": {
       const every = Math.max(1, Math.round(t.everySprints));
-      sprintsOf(ctx).forEach((sp, i) => {
-        if (i % every !== 0) return;
+      const list = sprintsOf(ctx);
+      // "every N sprints" counts from the sprint the schedule was made in (or the first after it), so
+      // adding or removing earlier sprints does not shift the count
+      const anchor = list.findIndex((sp) => sp.finish >= s.created);
+      list.forEach((sp, i) => {
+        if (anchor < 0 || i < anchor || (i - anchor) % every !== 0) return;
         const a = dayNo(sp.start);
         const b = dayNo(sp.finish);
         const base = t.at === "start" ? a : t.at === "end" ? b : a + Math.floor((b - a) / 2);
-        add(base + Math.round(t.offsetDays), { sprint: sp });
+        const n = base + Math.round(t.offsetDays);
+        // keyed by the sprint and the point, so moving the sprint's dates does not make another story
+        add(n, { key: `sprint-${sp.id || sp.path}-${t.at}`, legacyKey: ymd(n), sprint: sp });
       });
       break;
     }
@@ -169,59 +205,79 @@ export function occurrences(s: Schedule, ctx: ScheduleContext, from: string, to:
   return out.sort((a, b) => a.date.localeCompare(b.date));
 }
 
-/** What is due today: made on a day within the last week (or today), nothing from before the schedule existed. */
+/** What is due today: made on a day within the last week (or today), nothing from before the schedule's first day. */
 export function dueOccurrences(s: Schedule, ctx: ScheduleContext, today: string): Occurrence[] {
-  return occurrences(s, ctx, addDays(today, -BACKFILL_DAYS), today);
+  const out = occurrences(s, ctx, addDays(today, -BACKFILL_DAYS), today);
+  // an outlook is about its target date: still made while that date is today or ahead, however long nobody had a page open
+  const t = s.trigger;
+  if (t.kind === "outlook" && !out.length && isDay(t.date) && t.date >= today) return occurrences(s, ctx, s.activeFrom || s.created, today);
+  return out;
 }
 
 /** The next occurrence after today (a year ahead at most), or undefined. */
 export function nextOccurrence(s: Schedule, ctx: ScheduleContext, today: string): Occurrence | undefined {
-  return occurrences({ ...s, created: s.created < today ? s.created : today }, ctx, addDays(today, 1), addDays(today, 400))[0];
+  const early = (d: string): string => (d && d < today ? d : today);
+  return occurrences({ ...s, created: early(s.created), activeFrom: early(s.activeFrom) }, ctx, addDays(today, 1), addDays(today, 400))[0];
 }
 
 // ---------- what ----------
 
-/** The title with its {tokens} replaced for this occurrence. */
+/**
+ * The title with its {tokens} replaced for this occurrence. {year} is the calendar year, {weekyear} the year
+ * the ISO week belongs to (to go with {week}). An outlook's tokens tell its target date: the day it is about.
+ */
 export function renderTitle(title: string, o: Occurrence): string {
-  const [y, m] = [Number(o.date.slice(0, 4)), Number(o.date.slice(5, 7))];
+  const d = o.due && isDay(o.due) ? o.due : o.date;
+  const [y, m] = [Number(d.slice(0, 4)), Number(d.slice(5, 7))];
   const table: Record<string, string> = {
-    date: o.date, day: weekdayName(weekdayOf(o.date)), week: String(isoWeek(o.date)), month: MONTHS[m - 1], year: String(y),
+    date: d, day: weekdayName(weekdayOf(d)), week: String(isoWeek(d)), weekyear: String(isoWeekYear(d)), month: MONTHS[m - 1], year: String(y),
     quarter: `Q${Math.floor((m - 1) / 3) + 1}`, sprint: o.sprint?.name ?? "",
   };
   const out = title.replace(/\{(\w+)\}/g, (all, k: string) => (k in table ? table[k] : all)).replace(/\s+/g, " ").trim();
   return out.slice(0, 255);
 }
 
-/** A short hash of text as a number (for a draw that gives the same answer on every screen). */
-function seedOf(text: string): number {
+/** A hash of text as a number (for a draw that gives the same answer on every screen). */
+export function seedOf(text: string): number {
   let h = 2166136261;
   for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619);
+  // a final mix (MurmurHash3's): without it, keys one day apart differ only in the low bits,
+  // and a pool of two people takes turns instead of being drawn
+  h ^= h >>> 16;
+  h = Math.imul(h, 0x85ebca6b);
+  h ^= h >>> 13;
+  h = Math.imul(h, 0xc2b2ae35);
+  h ^= h >>> 16;
   return h >>> 0;
 }
 
+/** What a draw is seeded with: the schedule and the occurrence, so two schedules due on one day draw apart. */
+export const drawSeed = (scheduleId: string, key: string): string => `${scheduleId}|${key}`;
+
 /**
  * Who gets the story: nobody, the named person, the next one after `last` in the pool (a turn), or one
- * drawn from the pool by the occurrence's key, so a retry on another screen draws the same person.
+ * drawn from the pool by `seed` (see drawSeed), so a retry on another screen draws the same person.
  */
-export function pickAssignee(a: Template["assign"], team: string[], last: string | undefined, key: string): string | undefined {
+export function pickAssignee(a: Template["assign"], team: string[], last: string | undefined, seed: string): string | undefined {
   if (a.mode === "none") return undefined;
   if (a.mode === "person") return a.person || undefined;
   const pool = (a.pool.length ? a.pool : team).filter((x, i, all) => x && all.indexOf(x) === i).sort((x, y) => x.localeCompare(y));
   if (!pool.length) return undefined;
-  if (a.mode === "random") return pool[seedOf(key) % pool.length];
+  if (a.mode === "random") return pool[seedOf(seed) % pool.length];
   const at = last ? pool.indexOf(last) : -1;
   return pool[(at + 1) % pool.length];
 }
 
-/** The iteration path a story goes to. */
-export function placementPath(t: Template, o: Occurrence, iterations: Iteration[], current: Iteration | undefined, backlog: string): string {
+/** The iteration path a story goes to. `today` decides the next sprint when no sprint is going on. */
+export function placementPath(t: Template, o: Occurrence, iterations: Iteration[], current: Iteration | undefined, backlog: string, today = todayLocal()): string {
   if (t.placement === "backlog") return backlog;
   if (t.placement === "fixed") return t.iteration || backlog;
   if (t.placement === "occurrence" && o.sprint) return o.sprint.path;
   if (t.placement === "next") {
     const list = sprintsOf({ iterations });
     const now = current ? list.findIndex((s) => s.path === current.path) : -1;
-    const next = list[now + 1];
+    // no sprint going on (a gap, before the first, after the last): the first one that starts after today
+    const next = now >= 0 ? list[now + 1] : list.find((s) => s.start > today);
     return next?.path ?? backlog;
   }
   return current?.path ?? backlog;
@@ -262,7 +318,7 @@ export const blankTemplate = (): Template => ({
 export function blankTrigger(today: string): Trigger { return { kind: "weekly", weekdays: [1], everyWeeks: 1 }; }
 
 export function blankSchedule(id: string, today: string): Schedule {
-  return { id, name: "", enabled: true, trigger: blankTrigger(today), template: blankTemplate(), created: today };
+  return { id, name: "", enabled: true, trigger: blankTrigger(today), template: blankTemplate(), created: today, activeFrom: today };
 }
 
 /** A schedule as stored, made safe: a damaged or older document gives something that still works, or null. */
@@ -297,10 +353,27 @@ export function cleanSchedule(raw: unknown): Schedule | null {
     column: String(tp.column ?? "").trim().slice(0, 200),
     tags: (Array.isArray(tp.tags) ? tp.tags : []).map((x) => String(x).trim()).filter(Boolean),
   };
+  const created = isDay(r.created) ? r.created : todayLocal();
   return {
     id: r.id, __etag: r.__etag, name: String(r.name ?? "").slice(0, 120), enabled: r.enabled !== false, trigger, template,
-    created: isDay(r.created) ? r.created : todayLocal(), by: typeof r.by === "string" ? r.by : undefined,
+    created, activeFrom: isDay(r.activeFrom) && r.activeFrom > created ? r.activeFrom : created, by: typeof r.by === "string" ? r.by : undefined,
   };
+}
+
+/**
+ * An edit applied to the stored copy: only what the form changed (`before` -> `after`), so a change someone
+ * else saved meanwhile stays. A new trigger starts the schedule again from `today` (the past is not filled
+ * in); a new title or text keeps its first day.
+ */
+export function applyEdit(stored: Schedule, before: Schedule, after: Schedule, today: string): Schedule {
+  const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
+  const out: Schedule = { ...stored, template: { ...stored.template } };
+  if (!same(before.name, after.name)) out.name = after.name;
+  if (!same(before.enabled, after.enabled)) out.enabled = after.enabled;
+  if (!same(before.trigger, after.trigger)) { out.trigger = after.trigger; out.activeFrom = today; }
+  const tpl = out.template as unknown as Record<string, unknown>;
+  for (const k of Object.keys(after.template) as (keyof Template)[]) if (!same(before.template[k], after.template[k])) tpl[k] = structuredClone(after.template[k]);
+  return out;
 }
 
 /** What is wrong with a schedule, or "" when it is ready to save. */

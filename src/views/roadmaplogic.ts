@@ -2,7 +2,7 @@
 // (the item that waits starts before the item it waits for ends), also across teams.
 import { REL, relId } from "../api/api.ts";
 import type { WorkItem } from "../api/types.ts";
-import type { Span } from "./timeaxis.ts";
+import type { Span } from "../core/timeaxis.ts";
 
 export interface Dependency {
   /** the item waited for */
@@ -75,4 +75,12 @@ export function cleanTeams(raw: unknown, current: TeamRef, max = 12): TeamRef[] 
     if (out.length >= max) break;
   }
   return out;
+}
+
+/**
+ * Which drags a bar offers, from the planning date fields its type has: the whole bar needs both dates,
+ * an end needs its own date. A type with neither cannot be dragged.
+ */
+export function dragsFor(fields: { start: boolean; target: boolean }): { move: boolean; start: boolean; end: boolean } {
+  return { move: fields.start && fields.target, start: fields.start, end: fields.target };
 }

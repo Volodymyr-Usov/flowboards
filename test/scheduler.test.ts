@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import type { Iteration } from "../src/api/types.ts";
 import type { Schedule, Template } from "../src/core/scheduler.ts";
 import {
-  addDays, blankSchedule, cleanSchedule, describeTrigger, dueOccurrences, isoWeek, nextOccurrence, occurrences, pickAssignee, placementPath,
+  addDays, applyEdit, blankSchedule, cleanSchedule, describeTrigger, drawSeed, dueOccurrences, isoWeek, isoWeekYear, nextOccurrence, occurrences, pickAssignee, placementPath,
   renderTitle, scheduleProblem, todayLocal, weekdayOf,
 } from "../src/core/scheduler.ts";
 
@@ -155,4 +155,89 @@ test("cleanSchedule keeps a chosen sprint and the starting column; a fixed place
   assert.equal(b.template.iteration, "");
   assert.equal(mk({ placement: "next", iteration: "ignored" }).template.iteration, "");
   assert.equal(mk({}).template.column, "");
+});
+
+test("the next sprint when none is going on: the first that starts after today", () => {
+  const base = { ...blankSchedule("s", "2026-10-01").template, placement: "next" as const };
+  const o = { key: "k", date: "2026-10-17" };
+  assert.equal(placementPath(base, o, sprints, undefined, "P", "2026-10-17"), "P\\Sprint 2"); // the weekend between two sprints
+  assert.equal(placementPath(base, o, sprints, undefined, "P", "2026-09-01"), "P\\Sprint 1"); // before the first
+  assert.equal(placementPath(base, o, sprints, undefined, "P", "2026-12-01"), "P"); // after the last: the backlog
+  const undated: Iteration = { id: "x", name: "Undated", path: "P\\Undated", timeFrame: "current" };
+  assert.equal(placementPath(base, o, sprints, undated, "P", "2026-10-17"), "P\\Sprint 2"); // a current sprint without dates
+});
+
+test("keys: a sprint occurrence is its sprint and point; an outlook its target date; the older date key is kept", () => {
+  const s = make({ kind: "sprint", at: "start", offsetDays: 1, everySprints: 1 });
+  const o = occurrences(s, ctx, "2026-10-19", "2026-10-25")[0];
+  assert.equal(o.key, "sprint-2-start");
+  assert.equal(o.legacyKey, "2026-10-20");
+  // the sprint moves by two days: the same occurrence, the same key
+  const moved = sprints.map((i) => (i.id === "2" ? { ...i, start: "2026-10-21T00:00:00Z", finish: "2026-11-01T00:00:00Z" } : i));
+  const o2 = occurrences(s, { iterations: moved }, "2026-10-19", "2026-10-25")[0];
+  assert.equal(o2.key, "sprint-2-start");
+  assert.equal(o2.date, "2026-10-22");
+  const out = occurrences(make({ kind: "outlook", date: "2026-12-01", leadDays: 14 }), ctx, "2026-11-01", "2026-12-31")[0];
+  assert.equal(out.key, "2026-12-01");
+  assert.equal(out.legacyKey, "2026-11-17");
+  assert.equal(occurrences(make({ kind: "weekly", weekdays: [1], everyWeeks: 1 }), ctx, "2026-10-19", "2026-10-19")[0].legacyKey, undefined);
+});
+
+test("every N sprints counts from the sprint it was made in: an earlier sprint added later does not shift it", () => {
+  const s = make({ kind: "sprint", at: "start", offsetDays: 0, everySprints: 2 }, "2026-10-03");
+  const before: Iteration = { id: "0", name: "Sprint 0", path: "P\\Sprint 0", start: "2026-09-21T00:00:00Z", finish: "2026-10-02T00:00:00Z", timeFrame: "past" };
+  assert.deepEqual(dates(s, "2026-10-01", "2026-11-30"), ["2026-10-05", "2026-11-02"]);
+  assert.deepEqual(occurrences(s, { iterations: [before, ...sprints] }, "2026-10-01", "2026-11-30").map((o) => o.date), ["2026-10-05", "2026-11-02"]);
+});
+
+test("a schedule's first day: an edit or a restart does not fill in the past week", () => {
+  const daily = { ...make({ kind: "weekly", weekdays: [0, 1, 2, 3, 4, 5, 6], everyWeeks: 1 }, "2026-10-01"), activeFrom: "2026-10-22" };
+  assert.deepEqual(dueOccurrences(daily, ctx, "2026-10-23").map((o) => o.date), ["2026-10-22", "2026-10-23"]);
+  assert.equal(cleanSchedule({ id: "x", created: "2026-10-01", trigger: { kind: "date", date: "2026-10-23" } })!.activeFrom, "2026-10-01"); // older documents
+  assert.equal(cleanSchedule({ id: "x", created: "2026-10-01", activeFrom: "2026-10-20", trigger: { kind: "date", date: "2026-10-23" } })!.activeFrom, "2026-10-20");
+});
+
+test("an edit changes only what the form changed; a new trigger starts from today, a new title does not", () => {
+  const stored = { ...make({ kind: "weekly", weekdays: [1], everyWeeks: 1 }, "2026-10-01"), name: "Review", template: { ...blankSchedule("s", "2026-10-01").template, title: "Old", tags: ["a"] } };
+  const before = structuredClone(stored);
+  // meanwhile someone else added a tag and renamed it
+  const theirs = { ...stored, name: "Weekly review", template: { ...stored.template, tags: ["a", "b"] } };
+  const titled = applyEdit(theirs, before, { ...before, template: { ...before.template, title: "New" } }, "2026-10-23");
+  assert.equal(titled.template.title, "New");
+  assert.deepEqual(titled.template.tags, ["a", "b"]);
+  assert.equal(titled.name, "Weekly review");
+  assert.equal(titled.activeFrom, "2026-10-01");
+  const retimed = applyEdit(theirs, before, { ...before, trigger: { kind: "weekly", weekdays: [2], everyWeeks: 1 } }, "2026-10-23");
+  assert.equal(retimed.activeFrom, "2026-10-23");
+  assert.deepEqual(retimed.trigger, { kind: "weekly", weekdays: [2], everyWeeks: 1 });
+});
+
+test("an outlook made after its lead time, or left alone for long, is made at once while the date is ahead", () => {
+  const late = { ...make({ kind: "outlook", date: "2026-11-01", leadDays: 14 }, "2026-10-23") };
+  assert.deepEqual(dueOccurrences(late, ctx, "2026-10-23").map((o) => [o.date, o.due, o.key]), [["2026-10-23", "2026-11-01", "2026-11-01"]]);
+  const old = make({ kind: "outlook", date: "2026-11-01", leadDays: 60 }, "2026-08-01"); // due on 2 September, nobody opened a page since
+  assert.deepEqual(dueOccurrences(old, ctx, "2026-10-23").map((o) => o.date), ["2026-09-02"]);
+  assert.deepEqual(dueOccurrences(old, ctx, "2026-11-02"), []); // the date has passed
+  assert.deepEqual(dueOccurrences(make({ kind: "outlook", date: "2026-10-20", leadDays: 1 }, "2026-10-23"), ctx, "2026-10-23"), []);
+});
+
+test("titles: {weekyear} goes with {week}; {year} stays the calendar year; an outlook tells its target date", () => {
+  assert.equal(isoWeekYear("2024-12-30"), 2025);
+  assert.equal(isoWeekYear("2021-01-03"), 2020);
+  assert.equal(renderTitle("Week {week} {weekyear} ({year})", { key: "k", date: "2024-12-30" }), "Week 1 2025 (2024)");
+  assert.equal(renderTitle("Release {date} {month}", { key: "2026-12-01", date: "2026-11-17", due: "2026-12-01" }), "Release 2026-12-01 December");
+});
+
+test("a draw: the schedule counts, the same occurrence draws the same person, two people do not just take turns", () => {
+  const pool = { mode: "random" as const, person: "", pool: [] };
+  const team = ["a@x", "b@x"];
+  const days = Array.from({ length: 40 }, (_, i) => addDays("2026-01-01", i));
+  const seq = days.map((d) => pickAssignee(pool, team, undefined, drawSeed("s-1", d)));
+  assert.deepEqual(seq, days.map((d) => pickAssignee(pool, team, "a@x", drawSeed("s-1", d))));
+  const turns = seq.slice(1).filter((x, i) => x !== seq[i]).length;
+  assert.ok(turns < 35, `alternates ${turns} of 39 times`);
+  const a = seq.filter((x) => x === "a@x").length;
+  assert.ok(a > 8 && a < 32, `a drawn ${a} of 40 times`);
+  const other = days.map((d) => pickAssignee(pool, team, undefined, drawSeed("s-2", d)));
+  assert.notDeepEqual(other, seq);
 });

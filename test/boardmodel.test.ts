@@ -2,7 +2,54 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DEMO_PROCESS } from "../src/api/demo.ts";
 import type { BoardInfo, WorkItem } from "../src/api/types.ts";
-import { DEFAULT_RULES, alreadyBetween, boardColumns, cfdByColumn, columnOnDay, columnPath, cardOrder, nearestBox, capCards, CELL_CAP, clockClass, COLUMN_CAP, groupBy, limitShowing, columnEnteredAt, columnOf, countOf, featureGroups, matches, missing, prCount, prLinks, readAfterUndo, rowOf, runLimited, sharesState, sprintRows, tint } from "../src/views/boardmodel.ts";
+import { DEFAULT_RULES, alreadyBetween, boardColumns, cfdByColumn, columnOnDay, columnPath, cardOrder, nearestBox, capCards, CELL_CAP, clockClass, COLUMN_CAP, groupBy, limitShowing, columnEnteredAt, columnOf, countOf, featureGroups, matches, missing, movesToRow, placeAmong, prCount, prLinks, priorityMove, readAfterUndo, rowOf, runLimited, sharesState, sprintRows, tint } from "../src/views/boardmodel.ts";
+
+test("a split column is split only when the board says which half a card is in", () => {
+  const split = { ...board, columns: board.columns.map((c) => (c.name === "Doing" ? { ...c, isSplit: true } : c)) };
+  assert.deepEqual(boardColumns(DEMO_PROCESS, req, { ...split, doneField: "WEF_X_Done" }, "columns").map((c) => Boolean(c.split)), [false, false, true, false]);
+  assert.deepEqual(boardColumns(DEMO_PROCESS, req, split, "columns").map((c) => Boolean(c.split)), [false, false, false, false]);
+  assert.deepEqual(boardColumns(DEMO_PROCESS, req, { ...split, doneField: "WEF_X_Done" }, "states").map((c) => Boolean(c.split)), [false, false, false, false]);
+});
+
+test("a drop while the search lifts matches takes neighbours of the same kind, in backlog order", () => {
+  // on screen: matches 5 and 2 lifted to the top, then 1, 3, 4
+  const cards = [{ id: 5, hit: true, mid: 10 }, { id: 2, hit: true, mid: 30 }, { id: 1, hit: false, mid: 50 }, { id: 3, hit: false, mid: 70 }, { id: 4, hit: false, mid: 90 }];
+  // a card that does not match, dropped just under the last match: before the first card that does not match
+  assert.deepEqual(placeAmong(cards, false, 40), { before: 0, after: 1 });
+  assert.deepEqual(placeAmong(cards, false, 80), { before: 3, after: 4 });
+  assert.deepEqual(placeAmong(cards, false, 99), { before: 4, after: 0 });
+  // a match, dropped among the others: after the last match
+  assert.deepEqual(placeAmong(cards, true, 60), { before: 2, after: 0 });
+  assert.deepEqual(placeAmong(cards, true, 20), { before: 5, after: 2 });
+  // no search: the plain screen order
+  const plain = cards.map((c) => ({ ...c, hit: false }));
+  assert.deepEqual(placeAmong(plain, false, 40), { before: 2, after: 1 });
+});
+
+test("menu order moves: top, up, down, bottom; none where the card already is", () => {
+  const peers = [1, 2, 3, 4];
+  assert.deepEqual(priorityMove(peers, 3, "top"), { prev: 0, next: 1 });
+  assert.deepEqual(priorityMove(peers, 3, "up"), { prev: 1, next: 2 });
+  assert.deepEqual(priorityMove(peers, 2, "down"), { prev: 3, next: 4 });
+  assert.deepEqual(priorityMove(peers, 2, "bottom"), { prev: 4, next: 0 });
+  assert.equal(priorityMove(peers, 1, "up"), null);
+  assert.equal(priorityMove(peers, 1, "top"), null);
+  assert.equal(priorityMove(peers, 4, "down"), null);
+  assert.equal(priorityMove(peers, 4, "bottom"), null);
+  assert.equal(priorityMove(peers, 9, "up"), null);
+});
+
+test("story map: a story in a sprint the team does not use can be dropped on the backlog row", () => {
+  const b = String.fromCharCode(92);
+  const rows = sprintRows([{ id: "s1", name: "Sprint 1", path: `P${b}Sprint 1`, timeFrame: "current", start: "2026-10-12T00:00:00Z", finish: "2026-10-23T00:00:00Z" }], "P");
+  const backlog = rows[rows.length - 1];
+  assert.equal(rowOf(rows, `P${b}Other team${b}Sprint 9`).key, "backlog");
+  assert.equal(movesToRow(rows, backlog, `P${b}Other team${b}Sprint 9`), true);
+  assert.equal(movesToRow(rows, backlog, "P"), false, "already in the backlog iteration");
+  assert.equal(movesToRow(rows, rows[1], `P${b}Sprint 1`), false);
+  assert.equal(movesToRow(rows, rows[1], "P"), true);
+  assert.equal(movesToRow(rows, rows[0], "P"), false, "earlier sprints take no drops");
+});
 
 const req = DEMO_PROCESS.levels[2];
 const item = (p: Partial<WorkItem>): WorkItem => ({ id: 1, rev: 1, type: "User Story", title: "T", state: "New", category: "Proposed", area: "", iteration: "", tags: [], created: "", changed: "", fields: {}, ...p });

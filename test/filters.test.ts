@@ -139,3 +139,75 @@ test("an extra field is offered only when every item was read with it", () => {
   // every item read in full: offered
   assert.ok(fieldProps([item({ fields: { "Custom.Risk": "High" } }), item({ fields: {} })]).some((p) => p.id === "field:Custom.Risk"));
 });
+
+import { goneLabel, sameValue, teamKey, upgradeFilters, valueLabels } from "../src/core/filters.ts";
+
+test("people match by sign-in (two people can share a name); filters saved with names still match", () => {
+  const ann2: Person = { displayName: "Ann Lee", uniqueName: "ann.lee@other.example" };
+  const a = item({ id: 1, assignedTo: ann, createdBy: bob, changedBy: cy });
+  const b = item({ id: 2, assignedTo: ann2 });
+  const k = keyOfPerson(ann);
+  assert.equal(passes(a, { prop: "owner", values: [k] }, P("owner")), true);
+  assert.equal(passes(b, { prop: "owner", values: [k] }, P("owner")), false, "the other Ann Lee is someone else");
+  assert.equal(passes(a, { prop: "createdBy", values: [keyOfPerson(bob)] }, P("createdBy")), true);
+  assert.equal(passes(a, { prop: "changedBy", op: "none", values: [keyOfPerson(cy)] }, P("changedBy")), false);
+  // an older filter holds the name: it keeps working
+  assert.equal(passes(a, { prop: "owner", values: ["Ann Lee"] }, P("owner")), true);
+  assert.equal(passes(item({}), { prop: "owner", values: [""] }, P("owner")), true, "nobody is still (empty)");
+  // the list shows names, the values are sign-ins
+  const counts = valueCounts([a, b, item({ id: 3 })], P("owner"));
+  assert.deepEqual(counts.map((c) => [c.value, c.label]), [["", ""], [k, "Ann Lee"], ["ann.lee@other.example", "Ann Lee"]]);
+  assert.equal(describe({ prop: "owner", values: [k] }, P("owner"), (v) => valueLabels([a], P("owner")).get(v) ?? v), "Owner: Ann Lee");
+});
+
+test("sprints match by their full path and show their name; tags match whatever their case", () => {
+  const a = item({ iteration: "P\\Team A\\Sprint 4" });
+  const b = item({ iteration: "P\\Team B\\Sprint 4" });
+  assert.equal(passes(a, { prop: "sprint", values: ["P\\Team A\\Sprint 4"] }, P("sprint")), true);
+  assert.equal(passes(b, { prop: "sprint", values: ["P\\Team A\\Sprint 4"] }, P("sprint")), false, "another team's Sprint 4");
+  assert.equal(passes(b, { prop: "sprint", values: ["Sprint 4"] }, P("sprint")), true, "a filter saved with the name still matches");
+  assert.equal(valueCounts([a], P("sprint"))[0].label, "Sprint 4");
+  const t = item({ tags: ["UI", "Quick"] });
+  assert.equal(passes(t, { prop: "tags", values: ["ui"] }, P("tags")), true);
+  assert.equal(passes(t, { prop: "tags", op: "none", values: ["quick"] }, P("tags")), false);
+  assert.equal(sameValue(P("tags"), "UI", "ui"), true);
+  assert.equal(sameValue(P("state"), "Active", "active"), false);
+  const counts = valueCounts([t, item({ tags: ["ui"] })], P("tags"));
+  assert.deepEqual(counts.map((c) => [c.value, c.n]), [["UI", 2], ["Quick", 1]], "one value for both spellings");
+});
+
+test("filters saved with names become sign-ins and paths; a gone field says so", () => {
+  const items = [item({ id: 1, assignedTo: ann, iteration: "P\\A\\Sprint 4" }), item({ id: 2, iteration: "P\\B\\Sprint 4" })];
+  const old = [{ prop: "owner", values: ["Ann Lee", "Nobody here", ""] }, { prop: "sprint", values: ["Sprint 4"] }, { prop: "state", values: ["Active"] }];
+  const got = upgradeFilters(old, props, items);
+  assert.deepEqual(got[0].values, [keyOfPerson(ann), "Nobody here", ""], "a name nobody has now stays as it is");
+  assert.deepEqual(got[1].values, ["P\\A\\Sprint 4", "P\\B\\Sprint 4"], "a name stands for every sprint of that name");
+  assert.equal(got[2], old[2]);
+  assert.equal(upgradeFilters(got, props, items), got, "nothing more to change: the same list");
+  assert.equal(goneLabel("field:Custom.Risk"), "Custom.Risk: (field no longer available)");
+});
+
+test("each team keeps its own filters; the old page key moves to the first team once", () => {
+  const m = new Map<string, unknown>([["board.filters", [{ prop: "state", values: ["Active"] }]]]);
+  const store = { get: (k: string) => m.get(k), set: (k: string, v: unknown) => { m.set(k, v); } };
+  const empty = (v: unknown): boolean => cleanFilters(v).length === 0;
+  const a = teamKey(store, "board.filters", "Org/P/Team A", [], empty);
+  assert.equal(a, "board.filters@Org/P/Team A");
+  assert.deepEqual(m.get(a), [{ prop: "state", values: ["Active"] }], "moved to the first team");
+  assert.deepEqual(m.get("board.filters"), [], "and taken from the old key");
+  const b = teamKey(store, "board.filters", "Org/P/Team B", [], empty);
+  assert.equal(m.get(b), undefined, "another team starts with none");
+  m.set(a, [{ prop: "state", values: ["New"] }]);
+  assert.equal(teamKey(store, "board.filters", "Org/P/Team A", [], empty), a);
+  assert.deepEqual(m.get(a), [{ prop: "state", values: ["New"] }], "a team's own choice stays");
+  assert.equal(teamKey(store, "board.filters", "", [], empty), "board.filters", "no team known: the page key");
+});
+
+test("date filters: a target date is the day the person picked; created is the local day", async () => {
+  const { BASE_PROPS } = await import("../src/core/filters.ts");
+  const target = BASE_PROPS.find((p) => p.id === "target")!;
+  const created = BASE_PROPS.find((p) => p.id === "created")!;
+  const w = { targetDate: "2026-10-20T22:00:00Z", created: new Date(2026, 9, 21, 0, 30).toISOString() } as unknown as Parameters<typeof target.get>[0];
+  assert.equal(target.get(w), "2026-10-21"); // Berlin midnight of 21 October
+  assert.equal(created.get(w), "2026-10-21"); // 00:30 local time
+});

@@ -1,7 +1,20 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { startMode } from "../src/ui/pagebar.ts";
+import { filteredSummary, startMode } from "../src/ui/pagebar.ts";
 import { copyRowsOf, pageSheets } from "../src/ui/tableexport.ts";
+
+test("the Filtered chip counts every filter and person choice, also those whose control is hidden", () => {
+  assert.equal(filteredSummary([]), null);
+  assert.equal(filteredSummary([{ what: "filters", count: 0, says: [], off: true }]), null, "nothing on: no chip");
+  const s = filteredSummary([
+    { what: "people", count: 1, says: ["Only: Ann Lee"], off: false },
+    { what: "filters", count: 2, says: ["State: Active", "Tags: ui"], off: true },
+  ])!;
+  assert.equal(s.text, "Filtered: 3 (2 hidden)");
+  assert.match(s.title, /Only: Ann Lee; State: Active; Tags: ui/);
+  assert.match(s.title, /The Filter button is switched off in Settings > Menu & bars, but still filters this page/);
+  assert.equal(filteredSummary([{ what: "filters", count: 1, says: ["State: Active"], off: false }])!.text, "Filtered: 1");
+});
 
 test("the field starts on the saved side, and on Ask AI where there is nothing to search", () => {
   assert.equal(startMode("search", true), "search");

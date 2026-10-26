@@ -46,9 +46,20 @@ test("remainingOf: not yet there, outside the sprint, closed, estimate for a tas
   assert.equal(remainingOf(at("Active", SPRINT), open, spec), 0, "estimate only for tasks closed since");
 });
 
-test("dayMoments: the end of past days, now for today, nothing for days to come", () => {
-  const now = Date.parse("2026-03-04T12:00:00Z");
-  assert.deepEqual(dayMoments(["2026-03-03", "2026-03-04", "2026-03-05"], now), ["2026-03-03T23:59:59.999Z", "2026-03-04T12:00:00.000Z", null]);
+test("dayMoments: the end of past days (local time), now for today, nothing for days to come", () => {
+  const now = new Date(2026, 2, 4, 12).getTime();
+  assert.deepEqual(dayMoments(["2026-03-03", "2026-03-04", "2026-03-05"], now), [
+    new Date(2026, 2, 3, 23, 59, 59, 999).toISOString(), new Date(now).toISOString(), null]);
+  // just after local midnight the new day has begun, whatever the UTC date is
+  const early = new Date(2026, 2, 5, 0, 30).getTime();
+  assert.equal(dayMoments(["2026-03-05"], early)[0], new Date(early).toISOString());
+});
+
+test("sprintDays reads sprint dates and days off as the day they name, in any zone", () => {
+  // saved as local midnight of Berlin (the day before in UTC) or as UTC midnight: the same days
+  const days = sprintDays("2026-03-01T23:00:00Z", "2026-03-12T23:00:00Z", spec.workDays, [{ start: "2026-03-03T23:00:00Z", end: "2026-03-04T23:00:00Z" }]);
+  assert.deepEqual(days.slice(0, 3), ["2026-03-02", "2026-03-03", "2026-03-06"]);
+  assert.equal(days.length, 8);
 });
 
 test("burndown: actual per day, ideal from the first day to zero, future days empty", () => {

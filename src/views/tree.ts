@@ -21,6 +21,7 @@ import { pageBar } from "../ui/pagebar.ts";
 import { avatar, empty, help, itemPicker, menu, select, stateMark, toast, toggle, typeMark } from "../ui/kit.ts";
 import type { MenuItem } from "../ui/kit.ts";
 import { tagChip } from "../ui/tagchip.ts";
+import { ChildCounts } from "./childcounts.ts";
 
 interface TNode {
   /** work item id; group rows ("no parent") have negative ids */
@@ -304,10 +305,19 @@ export const treeView: View = {
           } else if (n.level.kind === "requirement") {
             for (const k of n.kids) { n.total++; if (isDone(k.item!)) n.done++; }
           }
+          // and the children that are not loaded (closed long ago, other teams' areas), once read
+          if (n.level.kind === "portfolio" || n.level.kind === "requirement") {
+            const x = childCounts.extra(n.id);
+            n.done += x.done;
+            n.total += x.total;
+            countIds.push(n.id);
+          }
         }
         n.kids.sort(cmp);
       };
+      const countIds: number[] = [];
       for (const r of [...roots, ...groupNodes]) walk(r, 0);
+      childCounts.want(countIds);
       roots.sort(cmp);
       roots.push(...groupNodes);
       if (firstDraw) {
@@ -961,11 +971,13 @@ export const treeView: View = {
       select_(selected);
       if (reveal != null) showNew();
     };
+    // progress counts of the children that are not loaded: drawn when read (not under a drag; the next update has them)
+    const childCounts = new ChildCounts(ws, () => { if (!drag) refresh(); });
     paintSort();
     refresh();
 
     return {
-      update() { if (drag) cancelDrag(); refresh(); },
+      update(changed) { childCounts.changed(changed); if (drag) cancelDrag(); refresh(); },
       select(id) {
         select_(id);
         // the keyboard goes on from the open item
@@ -976,7 +988,7 @@ export const treeView: View = {
         const row = rows.get(id);
         if (row) row.tabIndex = 0;
       },
-      unmount() { cancelDrag(); saveOpen(); document.removeEventListener("keydown", onEsc); },
+      unmount() { cancelDrag(); saveOpen(); childCounts.stop(); document.removeEventListener("keydown", onEsc); },
     };
   },
 };

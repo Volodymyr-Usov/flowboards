@@ -80,6 +80,15 @@
 .v-settings .set-menu .set-pick:not(:has(input:checked)) { opacity: .55; text-decoration: line-through; }
 
 /* a setting with its icon, its name and what it does */
+.v-settings .set-fill { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; }
+.v-settings .set-fill-rows { display: flex; flex-direction: column; gap: 8px; flex: 1 1 380px; min-width: 0; }
+.v-settings .set-fill-row { display: grid; grid-template-columns: minmax(110px, 1fr) 44px minmax(90px, 160px) 44px auto; align-items: center; gap: 8px; }
+.v-settings .set-fill-color { width: 44px; height: 28px; padding: 0 2px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); cursor: pointer; }
+.v-settings .set-fill-strength { width: 100%; accent-color: var(--accent); }
+.v-settings .set-fill-pct { font-variant-numeric: tabular-nums; }
+.v-settings .set-fill-sample { flex: 0 1 260px; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+.v-settings .set-fill-sample .card, .v-settings .set-fill-sample .feat { cursor: default; }
+@media (max-width: 520px) { .v-settings .set-fill-row { grid-template-columns: 1fr 44px; } .v-settings .set-fill-strength { grid-column: 1 / -1; } }
 .v-settings .set-opts { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 290px), 1fr)); gap: 8px; }
 .v-settings .set-opt { display: grid; grid-template-columns: auto 30px minmax(0, 1fr); align-items: start; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2, var(--panel)); cursor: pointer; }
 .v-settings .set-opt:hover { border-color: var(--faint); }

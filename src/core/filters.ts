@@ -3,6 +3,7 @@
 // a number range, a date range, or yes/no; person filters (only these people, hide those); and the
 // text search. Pure logic, no page: tested in test/filters.test.ts. The page parts: src/ui/filterbar.ts.
 import type { Person, WorkItem } from "../api/types.ts";
+import { dayKey, localDay, planKey } from "./timeaxis.ts";
 import { personKey } from "./model.ts";
 
 export type PropKind = "set" | "number" | "date" | "bool";
@@ -13,6 +14,11 @@ export interface Prop {
   kind: PropKind;
   /** set: the item's values ("" = empty); number/date: one value or undefined; bool: yes or no */
   get: (w: WorkItem) => string[] | number | string | boolean | undefined;
+  /** set: the words shown for the item's values, in the same order (a person's name for their sign-in, a sprint's
+   *  name for its path); without it the values themselves show. Filters saved with these words still match. */
+  shown?: (w: WorkItem) => string[];
+  /** set: values match whatever their case (tags) */
+  fold?: boolean;
 }
 
 export interface Filter {
@@ -29,7 +35,13 @@ export interface Filter {
 }
 
 const leafOf = (path: string): string => path.split("\\").pop() ?? path;
-const day = (iso: string | undefined): string | undefined => (iso ? iso.slice(0, 10) : undefined);
+/** a person in property filters: the sign-in name (lower case; two people can share a display name), "" for nobody */
+const who = (p: Person | undefined): string => (p ? personKey(p) : "");
+const nameOf = (p: Person | undefined): string => p?.displayName ?? "";
+/** a moment (created, changed, closed): its day in the local calendar */
+const day = (iso: string | undefined): string | undefined => (iso && !Number.isNaN(Date.parse(iso)) ? dayKey(localDay(iso)) : undefined);
+/** a planning date (target, due, a date field): the day the person picked, in any time zone */
+const planDate = (iso: string | undefined): string | undefined => planKey(iso) || undefined;
 const ISO = /^\d{4}-\d\d-\d\dT/;
 
 /** The fixed properties every work item has. */
@@ -37,20 +49,21 @@ export const BASE_PROPS: Prop[] = [
   { id: "type", label: "Type", kind: "set", get: (w) => [w.type] },
   { id: "state", label: "State", kind: "set", get: (w) => [w.state] },
   { id: "category", label: "State group", kind: "set", get: (w) => [w.category] },
-  { id: "owner", label: "Owner", kind: "set", get: (w) => [w.assignedTo?.displayName ?? ""] },
-  { id: "tags", label: "Tags", kind: "set", get: (w) => (w.tags.length ? w.tags : [""]) },
-  { id: "sprint", label: "Sprint", kind: "set", get: (w) => [leafOf(w.iteration)] },
+  { id: "owner", label: "Owner", kind: "set", get: (w) => [who(w.assignedTo)], shown: (w) => [nameOf(w.assignedTo)] },
+  { id: "tags", label: "Tags", kind: "set", get: (w) => (w.tags.length ? w.tags : [""]), fold: true },
+  // the full path: two teams can each have a "Sprint 4"
+  { id: "sprint", label: "Sprint", kind: "set", get: (w) => [w.iteration], shown: (w) => [leafOf(w.iteration)] },
   { id: "area", label: "Area", kind: "set", get: (w) => [w.area] },
   { id: "column", label: "Board column", kind: "set", get: (w) => [w.boardColumn ?? ""] },
   { id: "priority", label: "Priority", kind: "set", get: (w) => [w.priority != null ? String(w.priority) : ""] },
-  { id: "createdBy", label: "Created by", kind: "set", get: (w) => [w.createdBy?.displayName ?? ""] },
-  { id: "changedBy", label: "Changed by", kind: "set", get: (w) => [w.changedBy?.displayName ?? ""] },
+  { id: "createdBy", label: "Created by", kind: "set", get: (w) => [who(w.createdBy)], shown: (w) => [nameOf(w.createdBy)] },
+  { id: "changedBy", label: "Changed by", kind: "set", get: (w) => [who(w.changedBy)], shown: (w) => [nameOf(w.changedBy)] },
   { id: "effort", label: "Effort", kind: "number", get: (w) => w.effort },
   { id: "remaining", label: "Remaining work", kind: "number", get: (w) => w.remaining },
   { id: "created", label: "Created", kind: "date", get: (w) => day(w.created) },
   { id: "changed", label: "Changed", kind: "date", get: (w) => day(w.changed) },
   { id: "closed", label: "Closed", kind: "date", get: (w) => day(w.closed) },
-  { id: "target", label: "Target date", kind: "date", get: (w) => day(w.targetDate ?? w.dueDate) },
+  { id: "target", label: "Target date", kind: "date", get: (w) => planDate(w.targetDate ?? w.dueDate) },
   { id: "hasDesc", label: "Has a description", kind: "bool", get: (w) => Boolean(w.description && w.description.replace(/<[^>]*>/g, "").trim()) },
   { id: "hasAc", label: "Has acceptance criteria", kind: "bool", get: (w) => Boolean(w.acceptance && w.acceptance.replace(/<[^>]*>/g, "").trim()) },
   { id: "hasParent", label: "Has a parent", kind: "bool", get: (w) => Boolean(w.parent) },
@@ -94,7 +107,7 @@ export function fieldProps(items: Iterable<WorkItem>, names: Record<string, stri
     out.push({
       id: `field:${ref}`, label, kind,
       get: kind === "set" ? (w) => { const v = raw(w); return [v == null ? "" : typeof v === "object" ? String((v as { displayName?: string }).displayName ?? "") : String(v)]; }
-        : kind === "date" ? (w) => { const v = raw(w); return typeof v === "string" ? v.slice(0, 10) : undefined; }
+        : kind === "date" ? (w) => { const v = raw(w); return typeof v === "string" ? planDate(v) : undefined; }
         : kind === "bool" ? (w) => Boolean(raw(w))
         : (w) => { const v = raw(w); return typeof v === "number" ? v : undefined; },
     });
@@ -117,7 +130,10 @@ export function passes(w: WorkItem, f: Filter, p: Prop | undefined): boolean {
   const v = p.get(w);
   if (p.kind === "set") {
     const vals = Array.isArray(v) ? v : [String(v ?? "")];
-    const hit = vals.some((x) => f.values!.includes(x));
+    const want = p.fold ? f.values!.map((x) => x.toLowerCase()) : f.values!;
+    const has = (x: string): boolean => want.includes(p.fold ? x.toLowerCase() : x);
+    // filters saved before values were sign-ins and paths hold the shown words (a name, a sprint's name): they still match
+    const hit = vals.some(has) || Boolean(p.shown?.(w).some((x) => x !== "" && has(x)));
     return f.op === "none" ? !hit : hit;
   }
   if (p.kind === "number") {
@@ -136,20 +152,70 @@ export function passesAll(w: WorkItem, filters: Filter[], props: Map<string, Pro
   return filters.every((f) => passes(w, f, props.get(f.prop)));
 }
 
-/** The values a set property takes across the items, most common first, with counts. */
-export function valueCounts(items: Iterable<WorkItem>, p: Prop): { value: string; n: number }[] {
-  const m = new Map<string, number>();
+/** Two values of a property are the same (tags: whatever their case). */
+export const sameValue = (p: Prop | undefined, a: string, b: string): boolean => (p?.fold ? a.toLowerCase() === b.toLowerCase() : a === b);
+
+export interface ValueCount { value: string; n: number; label: string }
+
+/** The values a set property takes across the items, most common first, with counts and the words shown for them. */
+export function valueCounts(items: Iterable<WorkItem>, p: Prop): ValueCount[] {
+  const m = new Map<string, ValueCount>();
   for (const w of items) {
     const v = p.get(w);
-    for (const x of Array.isArray(v) ? v : [String(v ?? "")]) m.set(x, (m.get(x) ?? 0) + 1);
+    const shown = p.shown?.(w);
+    (Array.isArray(v) ? v : [String(v ?? "")]).forEach((x, i) => {
+      // tags that differ only in case are one value: the first spelling met is kept
+      const k = p.fold ? x.toLowerCase() : x;
+      const c = m.get(k) ?? { value: x, n: 0, label: shown?.[i] || x };
+      c.n++;
+      m.set(k, c);
+    });
   }
-  return [...m].map(([value, n]) => ({ value, n })).sort((a, b) => b.n - a.n || a.value.localeCompare(b.value));
+  return [...m.values()].sort((a, b) => b.n - a.n || a.label.localeCompare(b.label));
 }
 
-/** Short text for a filter chip, e.g. "State: Active, New" or "Effort: 3 to 8". */
-export function describe(f: Filter, p: Prop | undefined): string {
+/** The words shown for the values of a set property, by value (empty for a property that shows its values). */
+export function valueLabels(items: Iterable<WorkItem>, p: Prop | undefined): Map<string, string> {
+  const out = new Map<string, string>();
+  if (!p?.shown) return out;
+  for (const w of items) {
+    const v = p.get(w);
+    const shown = p.shown(w);
+    (Array.isArray(v) ? v : [String(v ?? "")]).forEach((x, i) => { if (!out.has(x) && shown[i]) out.set(x, shown[i]); });
+  }
+  return out;
+}
+
+/**
+ * Filters saved with the shown words (a person's name, a sprint's name) instead of the values (sign-in, path):
+ * each such word becomes the values it stands for among the items. The same list back when nothing changes.
+ */
+export function upgradeFilters(filters: Filter[], props: Map<string, Prop>, items: Iterable<WorkItem>): Filter[] {
+  const list = [...items];
+  let changed = false;
+  const out = filters.map((f) => {
+    const p = props.get(f.prop);
+    if (!p?.shown || p.kind !== "set" || !f.values?.length) return f;
+    const labels = valueLabels(list, p);
+    const values: string[] = [];
+    for (const v of f.values) {
+      const stands = v === "" || labels.has(v) ? [] : [...labels].filter(([, l]) => l === v).map(([k]) => k);
+      for (const x of stands.length ? stands : [v]) if (!values.includes(x)) values.push(x);
+    }
+    if (values.length === f.values.length && values.every((x, i) => x === f.values![i])) return f;
+    changed = true;
+    return { ...f, values };
+  });
+  return changed ? out : filters;
+}
+
+/** The chip of a filter whose property is no longer offered (a field no item has now). */
+export const goneLabel = (prop: string): string => `${prop.startsWith("field:") ? prop.slice(6) : prop}: (field no longer available)`;
+
+/** Short text for a filter chip, e.g. "State: Active, New" or "Effort: 3 to 8". `show` gives the words for a value. */
+export function describe(f: Filter, p: Prop | undefined, show: (value: string) => string = (v) => v): string {
   if (!p) return f.prop;
-  const empty = (x: string): string => x || "(empty)";
+  const empty = (x: string): string => (x ? show(x) || x : "(empty)");
   if (p.kind === "set") {
     const vals = f.values ?? [];
     const list = vals.length > 3 ? `${vals.slice(0, 2).map(empty).join(", ")} and ${vals.length - 2} more` : vals.map(empty).join(", ");
@@ -196,6 +262,24 @@ export function cleanFilters(raw: unknown): Filter[] {
     out.push(f);
   }
   return out;
+}
+
+/** Where the screen choices are read and written (prefs in the app; a plain map in the tests). */
+export interface ChoiceStore { get: (key: string) => unknown; set: (key: string, value: unknown) => void }
+
+/**
+ * The key of a page's filters for one team (`board.filters@Org/Project/Team`), so each team keeps its own.
+ * The first time, the filters kept under the page's old key (one for every team) move there, once:
+ * the old key is emptied, so another team does not start with them too.
+ */
+export function teamKey(store: ChoiceStore, key: string, scope: string, empty: unknown, isEmpty: (v: unknown) => boolean): string {
+  if (!scope) return key;
+  const k = `${key}@${scope}`;
+  if (store.get(k) === undefined) {
+    const old = store.get(key);
+    if (old !== undefined && !isEmpty(old)) { store.set(k, old); store.set(key, empty); }
+  }
+  return k;
 }
 
 // ---------- people ----------

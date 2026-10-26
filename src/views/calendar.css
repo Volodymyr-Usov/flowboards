@@ -98,3 +98,4 @@
 .v-calendar .cal-sched:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); }
 .v-calendar .cal-sched.made { border-style: solid; opacity: .6; }
 .v-calendar .cal-amark.sched { display: flex; align-items: center; gap: 6px; }
+.v-calendar .cal-readnote { color: var(--bad); gap: 4px; }

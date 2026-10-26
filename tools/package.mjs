@@ -4,9 +4,13 @@
 //
 //   node tools/package.mjs                      dist/<publisher>.<id>-<version>.vsix
 //   node tools/package.mjs --publisher me --version 1.2.3 --public
+//   node tools/package.mjs --no-tests          skip the unit tests (they run first by default)
+//
+// The About page shows the package's version: --version, else vss-extension.json (which must match package.json).
 import { readFile, writeFile, stat, readdir } from "node:fs/promises";
 import path from "node:path";
 import { deflateRawSync } from "node:zlib";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { build } from "./build.mjs";
 
@@ -25,13 +29,21 @@ async function filesUnder(rel) {
   return out;
 }
 
-const TYPES = { ".html": "text/html", ".png": "image/png", ".md": "text/markdown", ".js": "application/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".json": "application/json", ".vsixmanifest": "text/xml", ".vsomanifest": "application/json" };
+const TYPES = { ".html": "text/html", ".png": "image/png", ".gif": "image/gif", ".jpg": "image/jpeg", ".md": "text/markdown", ".js": "application/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".json": "application/json", ".vsixmanifest": "text/xml", ".vsomanifest": "application/json" };
 
 export async function makeVsix() {
-  await build();
   const m = JSON.parse(await readFile(path.join(root, "vss-extension.json"), "utf8"));
+  const pkg = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
+  if (!arg("version") && m.version !== pkg.version) throw new Error(`vss-extension.json says ${m.version} but package.json says ${pkg.version}; make them the same, or pass --version`);
   if (arg("publisher")) m.publisher = arg("publisher");
   if (arg("version")) m.version = arg("version");
+  if (!args.includes("--no-tests")) {
+    const t = spawnSync(process.execPath, ["--test", "--disable-warning=ExperimentalWarning", "test/**/*.test.ts"], { cwd: root, stdio: "inherit" });
+    if (t.status !== 0) throw new Error("Unit tests failed: no package made");
+  }
+  // the About page shows the version of this package
+  process.env.RELEASE_VERSION = m.version;
+  await build();
   if (args.includes("--public")) m.public = true;
   const flags = [...(m.galleryFlags ?? []), ...(m.public ? ["Public"] : [])];
 

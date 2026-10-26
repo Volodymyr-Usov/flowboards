@@ -11,7 +11,7 @@ import { h, icon } from "../ui/dom.ts";
 import { avatar, stateMark } from "../ui/kit.ts";
 import { tagChip } from "../ui/tagchip.ts";
 import { workingDaysLeft } from "./sprintlogic.ts";
-import { dayKey, todayDay } from "./timeaxis.ts";
+import { dayKey, todayDay } from "../core/timeaxis.ts";
 
 /** sprint dates are days without a time: shown as the day they name in any time zone */
 const UTC_DATE: Intl.DateTimeFormatOptions = { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" };

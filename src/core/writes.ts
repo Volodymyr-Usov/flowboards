@@ -7,6 +7,7 @@ import type { DeletedItem, PatchOp, Person, WorkItem } from "../api/types.ts";
 import type { ChangeLog } from "./changelog.ts";
 import type { CheckItem } from "./checklist.ts";
 import { Checklists, cleanList, progress } from "./checklist.ts";
+import { AC_FIELD, typeHasField } from "./health.ts";
 import { hasText, isDone, isRemoved, isUnder, levelOf, plainText } from "./model.ts";
 import type { Facts, MoveCheck, Rule } from "./rules.ts";
 import { checkMove } from "./rules.ts";
@@ -23,6 +24,41 @@ export class RuleError extends Error {
 }
 
 export interface FieldChange { field: string; value: unknown; label?: string }
+
+/**
+ * A change refused before it was sent: someone else changed the same field since the box was opened
+ * (or since the change being undone). `item` is the copy with their value.
+ */
+export class ConflictError extends Error {
+  conflict = true;
+  item: WorkItem;
+  fields: string[];
+  constructor(item: WorkItem, fields: string[]) {
+    super(`${fields.map(fieldLabel).join(", ")} of #${item.id} was changed meanwhile (by someone else, or by you in another tab). Nothing was saved, so that change stays.`);
+    this.item = item;
+    this.fields = fields;
+  }
+}
+
+/** The same field value? Empty is empty, people by account, text without outer spaces. */
+export function sameValue(a: unknown, b: unknown): boolean {
+  const norm = (v: unknown): string => {
+    if (v == null) return "";
+    if (typeof v === "object") { const p = v as Partial<Person>; return String(p.uniqueName ?? p.displayName ?? JSON.stringify(v)).toLowerCase(); }
+    return String(v).trim();
+  };
+  return norm(a) === norm(b);
+}
+
+/** Tags after adding and removing some (case does not matter); the item's other tags stay as they are. */
+export function applyTags(tags: string[], add: string[], remove: string[]): { tags: string[]; added: string[]; removed: string[] } {
+  const has = (xs: string[], t: string): boolean => xs.some((x) => x.toLowerCase() === t.toLowerCase());
+  const removed = tags.filter((t) => has(remove, t));
+  const kept = tags.filter((t) => !has(remove, t));
+  const added: string[] = [];
+  for (const raw of add) { const t = raw.trim(); if (t && !has(kept, t) && !has(added, t)) added.push(t); }
+  return { tags: [...kept, ...added], added, removed };
+}
 
 const FIELD_LABEL: Record<string, string> = {
   "System.Title": "Title", "System.State": "State", "System.AssignedTo": "Owner", "System.IterationPath": "Sprint",
@@ -99,27 +135,91 @@ export class Writer {
     }
   }
 
-  /** Change plain fields. Undo puts the old values back. */
-  async setFields(id: number, changes: FieldChange[]): Promise<WriteResult> {
-    const it = this.item(id);
-    const before: Record<string, unknown> = {};
-    const after: Record<string, unknown> = {};
-    const ops: PatchOp[] = [];
-    for (const c of changes) {
-      const old = rawValue(it, c.field);
-      before[c.field] = old ?? null;
-      after[c.field] = c.value ?? null;
-      const empty = c.value == null || c.value === "";
-      if (empty && old == null) continue;
-      ops.push(empty ? { op: "remove", path: `/fields/${c.field}` } : { op: "add", path: `/fields/${c.field}`, value: c.value });
+  /** A field's value in a copy: the raw field, else what the copy was read into (state, title, board column). */
+  valueOf(it: WorkItem, field: string): unknown {
+    if (field in it.fields) return it.fields[field];
+    if (field === "System.State") return it.state;
+    if (field === "System.Title") return it.title;
+    if (field === "System.Tags") return it.tags.join("; ");
+    if (field === this.ws.board?.columnField || field === "System.BoardColumn") return it.boardColumn;
+    return undefined;
+  }
+
+  /**
+   * Run a write on the newest copy of an item. `expect`: the field values the change was made on (what
+   * an edit box showed when it was opened). When the item now has other values in those fields, someone
+   * else changed them meanwhile: refused with a ConflictError, nothing is sent. A change of other fields
+   * meanwhile is no conflict. `retry`: refused by Azure DevOps as changed meanwhile (our copy was behind):
+   * read the item again and try once more; the check above runs again on the fresh copy.
+   */
+  private async guarded<T>(id: number, expect: Record<string, unknown> | undefined, run: (it: WorkItem) => Promise<T>, retry = Boolean(expect)): Promise<T> {
+    for (let attempt = 0; ; attempt++) {
+      let it = this.item(id);
+      if (expect) {
+        // a guessed copy may hold old values: read it first
+        if (it.stale) { await this.ws.refresh(id).catch(() => undefined); it = this.item(id); }
+        let copy = it;
+        // a copy read with a short field list may not have the field: read the item in full for the check
+        if (Object.keys(expect).some((f) => it.fieldsRead && !it.fieldsRead.includes(f))) {
+          const full = await this.ws.api.item(it.project ?? this.ws.project, id).catch(() => it);
+          copy = { ...it, fields: { ...it.fields, ...full.fields } };
+        }
+        const differ = Object.keys(expect).filter((f) => !sameValue(this.valueOf(copy, f), expect[f]));
+        if (differ.length) throw new ConflictError(it, differ);
+      }
+      try {
+        return await run(it);
+      } catch (e) {
+        if (!retry || attempt > 0 || (e as { status?: number }).status !== 412) throw e;
+        await this.ws.refresh(id).catch(() => undefined);
+      }
     }
-    if (!ops.length) return { item: it };
-    const action = changes.map((c) => `${c.label ?? fieldLabel(c.field)}: ${show(before[c.field])} → ${show(c.value)}`).join("; ");
-    const fresh = await this.patch(id, ops, action, before, after);
-    return {
-      item: fresh,
-      undo: () => this.setFields(id, changes.map((c) => ({ field: c.field, label: c.label, value: personValue(before[c.field]) }))),
-    };
+  }
+
+  /**
+   * Change plain fields. `expect`: the values the change was made on (see guarded). Undo puts the old
+   * values back, but only while the fields still hold what this change wrote: a newer change by someone
+   * else is not undone.
+   */
+  async setFields(id: number, changes: FieldChange[], opts: { expect?: Record<string, unknown> } = {}): Promise<WriteResult> {
+    return this.guarded(id, opts.expect, async (it) => {
+      const before: Record<string, unknown> = {};
+      const after: Record<string, unknown> = {};
+      const ops: PatchOp[] = [];
+      for (const c of changes) {
+        const old = rawValue(it, c.field);
+        before[c.field] = old ?? null;
+        after[c.field] = c.value ?? null;
+        const empty = c.value == null || c.value === "";
+        if (empty && old == null) continue;
+        ops.push(empty ? { op: "remove", path: `/fields/${c.field}` } : { op: "add", path: `/fields/${c.field}`, value: c.value });
+      }
+      if (!ops.length) return { item: it };
+      const action = changes.map((c) => `${c.label ?? fieldLabel(c.field)}: ${show(before[c.field])} → ${show(c.value)}`).join("; ");
+      const fresh = await this.patch(id, ops, action, before, after);
+      const wrote: Record<string, unknown> = {};
+      for (const c of changes) wrote[c.field] = this.valueOf(fresh, c.field) ?? null;
+      return {
+        item: fresh,
+        undo: () => this.setFields(id, changes.map((c) => ({ field: c.field, label: c.label, value: personValue(before[c.field]) })), { expect: wrote }),
+      };
+    });
+  }
+
+  /**
+   * Add and remove tags: applied to the item's newest tags, so a tag someone else added or removed
+   * meanwhile stays as they left it. Undo takes back only what this change did.
+   */
+  async changeTags(id: number, add: string[], remove: string[]): Promise<WriteResult> {
+    return this.guarded(id, undefined, async (it) => {
+      const r = applyTags(it.tags, add, remove);
+      if (!r.added.length && !r.removed.length) return { item: it };
+      const value = r.tags.join("; ");
+      const ops: PatchOp[] = [value ? { op: "add", path: "/fields/System.Tags", value } : { op: "remove", path: "/fields/System.Tags" }];
+      const action = [r.added.length ? `Tags added: ${r.added.join(", ")}` : "", r.removed.length ? `Tags removed: ${r.removed.join(", ")}` : ""].filter(Boolean).join("; ");
+      const fresh = await this.patch(id, ops, action, { "System.Tags": it.tags.join("; ") || null }, { "System.Tags": value || null });
+      return { item: fresh, undo: () => this.changeTags(id, r.removed, r.added) };
+    }, true);
   }
 
   // ---------- state and board column ----------
@@ -169,6 +269,7 @@ export class Writer {
       kind,
       description: plainText(it.description),
       acceptance: plainText(it.acceptance),
+      hasAcceptanceField: typeHasField(this.ws.process, it.type, AC_FIELD),
       hasOwner: Boolean(it.assignedTo),
       hasParent: Boolean(it.parent),
       hasEffort: it.effort != null && it.effort > 0,
@@ -233,9 +334,26 @@ export class Writer {
   /**
    * Move an item to a state, or (for stories on a team board) to a board column, which also sets
    * the state the column maps to. `force` skips the rules except "only these people may".
+   * `expect`: the field values the move was planned on (an Undo); see guarded.
    */
-  async move(id: number, target: { state?: string; column?: string }, opts: { force?: boolean } = {}): Promise<WriteResult> {
-    const it = this.item(id);
+  async move(id: number, target: { state?: string; column?: string }, opts: { force?: boolean; expect?: Record<string, unknown> } = {}): Promise<WriteResult> {
+    return this.guarded(id, opts.expect, (it) => this.moveNow(it, target, Boolean(opts.force)));
+  }
+
+  /**
+   * The board column a move by state ends in, for the rules: the item's own column when it already
+   * stands for that state, else the first column that does. Only for stories on the team's board.
+   */
+  columnForState(it: WorkItem, state: string): string | null {
+    const board = this.ws.board;
+    if (!board?.columnField || levelOf(this.ws.process, it.type)?.kind !== "requirement") return null;
+    const own = board.columns.find((c) => c.name === it.boardColumn);
+    if (own && own.stateMappings[it.type] === state) return own.name;
+    return board.columns.find((c) => c.stateMappings[it.type] === state)?.name ?? null;
+  }
+
+  private async moveNow(it: WorkItem, target: { state?: string; column?: string }, force: boolean): Promise<WriteResult> {
+    const id = it.id;
     const board = this.ws.board;
     const columnField = board?.columnField;
     const useColumns = Boolean(target.column && board && columnField);
@@ -246,11 +364,16 @@ export class Writer {
       const col = board!.columns.find((c) => c.name === to);
       state = col?.stateMappings[it.type] ?? state;
     }
-    const check = await this.check(id, from, to, useColumns, state);
+    // a story moved by its state (a list, the Backlog, Health, Ask AI) lands in a board column too:
+    // the rules of that column count as if it had been moved there on the board
+    const landsIn = !useColumns && state && state !== it.state ? this.columnForState(it, state) : null;
+    const check = landsIn != null
+      ? await this.check(id, it.boardColumn ?? "", landsIn, true, state)
+      : await this.check(id, from, to, useColumns, state);
     let bypassed: string[] | undefined;
     if (!check.ok) {
       const people = check.problems.filter((p) => p.rule.onlyBy.length && p.missing.some((m) => m.startsWith("Only ")));
-      if (!opts.force || people.length) throw new RuleError(check);
+      if (!force || people.length) throw new RuleError(check);
       bypassed = check.problems.flatMap((p) => p.missing.map((m) => `${p.rule.target}: ${m}`));
     }
     const ops: PatchOp[] = [];
@@ -266,9 +389,12 @@ export class Writer {
     const action = useColumns ? `Column: ${from || "(none)"} → ${to}${state && state !== it.state ? ` (state ${it.state} → ${state})` : ""}` : `State: ${it.state} → ${state}`;
     // send the revision the move was planned on: if the item changed during the rule check, it is refused
     const fresh = await this.patch(id, ops, action, before, after, bypassed, it.rev);
+    // Undo moves it back only while it stands where this move put it: a newer move by someone else stays
+    const expect: Record<string, unknown> = { "System.State": this.valueOf(fresh, "System.State") };
+    if (useColumns && columnField) expect[columnField] = this.valueOf(fresh, columnField);
     return {
       item: fresh,
-      undo: () => this.move(id, useColumns ? { column: from, state: it.state } : { state: it.state }, { force: true }),
+      undo: () => this.move(id, useColumns ? { column: from, state: it.state } : { state: it.state }, { force: true, expect }),
     };
   }
 

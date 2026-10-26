@@ -12,7 +12,7 @@ import { suggestedRules } from "../core/rules.ts";
 import type { AiSettings, SharedSettings, TeamPeople } from "../core/settings.ts";
 import type { UrgencyWeights } from "../core/urgency.ts";
 import { cleanUrgency, DEFAULT_URGENCY } from "../core/urgency.ts";
-import { resetPrefs } from "../core/settings.ts";
+import { resetPrefs, teamPeopleKey, teamPeopleOf } from "../core/settings.ts";
 import type { ChildTemplate } from "../core/templates.ts";
 import { cleanTemplates, EXAMPLE_TASKS, titleKey } from "../core/templates.ts";
 import type { Child } from "../ui/dom.ts";
@@ -23,12 +23,14 @@ import { keepFocus } from "../ui/focuskeep.ts";
 import { avatar, busy, confirm, errorText, help, personPicker, segmented, select, toast, typeMark } from "../ui/kit.ts";
 import type { PrShow } from "./boardmodel.ts";
 import { boardColumns } from "./boardmodel.ts";
-import { columnHidden, columnShownPatch, readBoardOpts, saveBoardOpts } from "./boardprefs.ts";
+import { boardScope, columnHidden, columnShownPatch, readBoardOpts, saveBoardOpts } from "./boardprefs.ts";
+import type { Fill, FillPart } from "./cardfill.ts";
+import { applyFills, DEFAULT_STRENGTH } from "./cardfill.ts";
 import { pageBar } from "../ui/pagebar.ts";
 import type { PillarDraft } from "./pillareditor.ts";
 import { checkPillars, pillarDraft, pillarEditor, savePillars } from "./pillareditor.ts";
 import type { EditCtx, Problem } from "./ruleeditor.ts";
-import { clearInvalid, clone, markInvalid, moveIn, newId, ruleCard, ruleProblem, svgArrow } from "./ruleeditor.ts";
+import { clearInvalid, clone, markInvalid, moveIn, newId, ruleCard, levelHasAcceptance, ruleProblem, svgArrow } from "./ruleeditor.ts";
 
 type Tab = "menu" | "cards" | "columns" | "team" | "priority" | "rules" | "checklists" | "tasks" | "board" | "strategy" | "ai" | "mine";
 
@@ -288,7 +290,7 @@ export const settingsView: View = {
               h("button.btn", {
                 title: "Add a sensible starting set for this process (nothing is on until you save)", disabled: app.actions.readOnly, "data-fk": "rules:suggest",
                 onclick: () => {
-                  const add = suggestedRules(orderedStates(ws.process, reqTypes))
+                  const add = suggestedRules(orderedStates(ws.process, reqTypes), { acceptance: levelHasAcceptance(ws, "requirement") })
                     .filter((s) => !rules.some((r) => r.level === s.level && r.target === s.target))
                     .map((s) => ({ ...s, id: rules.some((r) => r.id === s.id) ? newId("r") : s.id }));
                   if (!add.length) { toast("The suggested rules are already in the list"); return; }
@@ -541,7 +543,53 @@ export const settingsView: View = {
             epic && feat ? sw(epic.name, "roadmap", o.epics, `Group the ${feat.defaultType} list in ${epic.defaultType} boxes (on the story map: under their ${epic.defaultType}). Switching it off ungroups; the eye on a box does the same.`, (v) => saveBoardOpts(v ? { epics: true, features: true } : { epics: false })) : null,
             feat ? sw(feat.name, "tree", o.features, `The ${feat.defaultType} list and the lines from it to the cards. Switching it off gives the columns the full width.`, (v) => saveBoardOpts({ features: v, epics: v ? o.epics : false })) : null,
             feat ? sw("Empty", "filter", o.empty, `Also list open ${feat.name} that have no ${low} yet, so they can be planned from the Board.`, (v) => saveBoardOpts({ empty: v })) : null,
-          ])));
+          ]),
+          fillsCard(epic?.defaultType, feat?.defaultType, req.defaultType)));
+    }
+
+    /**
+     * Your own fill colours of the Epic box, the Feature card and the story card. A colour is blended into
+     * the theme's own fill by its strength, so it works in light and dark; the sample shows it at once.
+     */
+    function fillsCard(epicType: string | undefined, featType: string | undefined, storyType: string): HTMLElement {
+      const parts: { part: FillPart; label: string; base: string }[] = [
+        ...(epicType ? [{ part: "epic" as const, label: `${epicType} box`, base: "#c8660f" }] : []),
+        ...(featType ? [{ part: "feature" as const, label: `${featType} card`, base: "#3a78c2" }] : []),
+        { part: "story", label: `${storyType} card`, base: "#6b7a90" },
+      ];
+      const box: HTMLElement & { paint?: () => void } = live(() => {
+        const o = readBoardOpts();
+        const fills = { ...o.fills };
+        applyFills(fills); // the sample shows what is saved, also before the Board was opened
+        const save = (part: FillPart, f: Fill | undefined): void => {
+          if (f) fills[part] = f; else delete fills[part];
+          saveBoardOpts({ fills: { ...fills } });
+          applyFills(fills);
+        };
+        const rows = parts.map(({ part, label, base }) => {
+          const cur = fills[part];
+          const color = h("input.set-fill-color", { type: "color", value: cur?.color ?? base, title: `Choose the fill colour of the ${label}`, "aria-label": `${label}: colour` }) as HTMLInputElement;
+          const strength = h("input.set-fill-strength", { type: "range", min: 10, max: 100, step: 5, value: cur?.strength ?? DEFAULT_STRENGTH, title: `How strong the colour is: low keeps the theme's own fill, 100% is the colour itself`, "aria-label": `${label}: strength` }) as HTMLInputElement;
+          const pct = h("span.small.muted.set-fill-pct", null, cur ? `${cur.strength}%` : "Theme");
+          const now = (): Fill => ({ color: color.value, strength: Number(strength.value) });
+          // while dragging or picking: the sample changes; let go: kept
+          const preview = (): void => { pct.textContent = `${strength.value}%`; applyFills({ ...fills, [part]: now() }); };
+          for (const el of [color, strength]) {
+            el.addEventListener("input", preview);
+            el.addEventListener("change", () => save(part, now()));
+          }
+          const reset = h("button.btn.small", { type: "button", title: `Back to the theme's own fill of the ${label}`, disabled: !cur, onclick: () => { save(part, undefined); box.paint?.(); } }, "Default");
+          return h("div.set-fill-row", null, h("b", null, label), color, strength, pct, reset);
+        });
+        const sample = h("div.set-fill-sample", { "aria-hidden": "true", title: "How the Board will look" },
+          h("div.epic-box", null,
+            epicType ? h("div.epic-head", null, h("span.e-name", null, h("span.ebadge", null, epicType), "Self-service onboarding")) : null,
+            h("div.feat", null, h("div.f-top", null, h("span.f-name", null, featType ? `${featType}: Welcome emails` : "Welcome emails")))),
+          h("div.card", null, h("div.c-main", null, h("span.c-title", null, `${storyType}: Review consent banner`), h("span.c-id", null, "#43 · 3d"))));
+        return card("Colours", `The fill of the ${[epicType && `${epicType} box`, featType && `${featType} card`, `${storyType} card`].filter(Boolean).join(", ")} on the Board. A low strength tints the theme's own fill, so it works in light and dark; from 50% the text turns dark or light to stay readable. Default puts the theme's fill back.`,
+          h("div.set-fill", null, h("div.set-fill-rows", null, ...rows), sample));
+      });
+      return box;
     }
 
     /** Which Board columns show, and which pull requests count on cards: yours, applied at once. */
@@ -550,13 +598,13 @@ export const settingsView: View = {
       return h("div", null,
         h("p.set-intro", null, "Choose which columns the Board shows. The columns come from the team's board (or from the states, see Project board); a hidden column keeps its cards, they just are not drawn. On the Board, the eye on a column title hides it and a grey arrow next to it brings it back; this list does the same."),
         h("div.set-list", null, live(() => {
-          const o = readBoardOpts();
+          const o = readBoardOpts(boardScope(ws));
           const cols = boardColumns(ws.process, req, ws.board, app.settings.shared.boardMode === "states" || !ws.board?.columnField ? "states" : "columns");
           const box = h("div");
           const kindText = (k: string): string => (k === "incoming" ? "The column new work lands in. Hidden by default: it is the backlog's front door." : k === "outgoing" ? "The column of finished work. Hidden by default; what was closed lately shows here." : "A working column.");
           box.append(card("Board columns", "Each column with its colour. Tick the ones you want to see.", h("div.set-opts", null, cols.map((c) => opt({
             label: c.name, desc: kindText(c.kind), on: !columnHidden(o, c), fk: `disp:${c.name}`,
-            lead: h("i.set-dot", { style: { background: c.color } }), set: (v) => { saveBoardOpts(columnShownPatch(readBoardOpts(), c, v)); },
+            lead: h("i.set-dot", { style: { background: c.color } }), set: (v) => { saveBoardOpts(columnShownPatch(readBoardOpts(boardScope(ws)), c, v), boardScope(ws)); },
           })))));
           return box;
         }) as HTMLElement),
@@ -648,8 +696,8 @@ export const settingsView: View = {
     // ---------------- Team: who counts as a member ----------------
 
     function teamTab(): HTMLElement {
-      const key = ws.team;
-      const saved = (): TeamPeople => { const t = app.settings.shared.teamPeople?.[key]; return { off: [...(t?.off ?? [])], extra: [...(t?.extra ?? [])] }; };
+      const key = teamPeopleKey(ws.team, ws.teamId);
+      const saved = (): TeamPeople => { const t = teamPeopleOf(app.settings.shared, ws.team, ws.teamId); return { off: [...(t?.off ?? [])], extra: [...(t?.extra ?? [])] }; };
       const members = [...ws.members].sort((a, b) => a.displayName.localeCompare(b.displayName));
       const isMember = (p: Person): boolean => members.some((m) => personKey(m) === personKey(p));
       return h("div", null,
@@ -687,8 +735,9 @@ export const settingsView: View = {
         async (s) => {
           const all = { ...(app.settings.shared.teamPeople ?? {}) };
           if (s.off.length || s.extra.length) all[key] = { off: s.off, extra: s.extra }; else delete all[key];
+          if (key !== ws.team) delete all[ws.team]; // kept by the team's id from now on
           await app.actions.logged("Settings: team members changed", { type: "Settings", title: "Team" }, () => app.settings.saveShared({ teamPeople: all }));
-          ws.setTeamTweaks(app.settings.shared.teamPeople?.[key]);
+          ws.setTeamTweaks(teamPeopleOf(app.settings.shared, ws.team, ws.teamId));
           return `Saved: ${ws.teamMembers().length} people count as members of ${ws.team}`;
         }, undefined, ["teamPeople"]));
     }

@@ -40,10 +40,28 @@ export function resizableColumns(table: HTMLTableElement, key: string): void {
   if (saved && saved.length === ths.length && saved.every((w) => typeof w === "number" && w >= MIN)) apply(saved);
 
   ths.forEach((th, i) => {
-    const grip = h("span.col-grip", { title: "Drag to change the width; double-click for the automatic widths", "aria-hidden": "true" });
+    const name = (th.textContent ?? "").replace(/\s+/g, " ").trim() || `column ${i + 1}`;
+    // a separator the keyboard can reach: the arrow keys change the width, Delete gives the automatic widths
+    const grip = h("span.col-grip", {
+      role: "separator", "aria-orientation": "vertical", tabindex: 0, "aria-label": `Width of ${name}`,
+      title: "Drag (or the arrow keys) to change the width; double-click (or Delete) for the automatic widths",
+    });
     // the title's own click (sorting) is not this
     grip.addEventListener("click", (e) => e.stopPropagation());
     grip.addEventListener("dblclick", (e) => { e.stopPropagation(); reset(); });
+    grip.addEventListener("keydown", (e) => {
+      const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+      if (!step && e.key !== "Delete" && e.key !== "Backspace") return;
+      // the title's own keys (sorting on Enter) are not this
+      e.preventDefault();
+      e.stopPropagation();
+      if (!step) { reset(); return; }
+      const widths = ths.map((t) => t.getBoundingClientRect().width);
+      widths[i] = Math.max(MIN, widths[i] + step * (e.shiftKey ? 50 : 10));
+      apply(widths);
+      grip.setAttribute("aria-valuenow", String(Math.round(widths[i])));
+      prefs.set(prefKey, widths.map((w) => Math.round(w)));
+    });
     grip.addEventListener("pointerdown", (e) => {
       if (e.button !== 0) return;
       e.preventDefault();

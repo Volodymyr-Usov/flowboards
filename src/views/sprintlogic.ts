@@ -56,12 +56,16 @@ export interface CleanupChoice {
   tasks: WorkItem[];
 }
 
+/**
+ * `ref` names a step that later steps depend on; `after` is the ref of that step: when it failed, the
+ * step is skipped (a task does not go to the next sprint without its story, or without the copy).
+ */
 export type CleanupStep =
-  | { kind: "iteration"; id: number; path: string }
+  | { kind: "iteration"; id: number; path: string; ref?: string; after?: string }
   /** make a copy of the story in the next sprint; `ref` names it for the steps after */
   | { kind: "copy"; ref: string; from: number; title: string; path: string; parent?: number }
   /** put a task under the copy made by the step with this ref */
-  | { kind: "reparent"; id: number; ref: string };
+  | { kind: "reparent"; id: number; ref: string; after: string };
 
 /**
  * The changes, in order. Move: the story, then its chosen tasks, to the next sprint.
@@ -72,18 +76,35 @@ export function cleanupSteps(choices: CleanupChoice[], nextPath: string): Cleanu
   const out: CleanupStep[] = [];
   for (const c of choices) {
     if (c.mode === "move") {
-      if (c.story.iteration !== nextPath) out.push({ kind: "iteration", id: c.story.id, path: nextPath });
-      for (const t of c.tasks) if (t.iteration !== nextPath) out.push({ kind: "iteration", id: t.id, path: nextPath });
+      const ref = `move-${c.story.id}`;
+      const moves = c.story.iteration !== nextPath;
+      if (moves) out.push({ kind: "iteration", id: c.story.id, path: nextPath, ref });
+      for (const t of c.tasks) if (t.iteration !== nextPath) out.push({ kind: "iteration", id: t.id, path: nextPath, ...(moves ? { after: ref } : {}) });
     } else if (c.mode === "split") {
       const ref = `copy-${c.story.id}`;
       out.push({ kind: "copy", ref, from: c.story.id, title: continuedTitle(c.story.title), path: nextPath, parent: c.story.parent });
       for (const t of c.tasks) {
-        out.push({ kind: "reparent", id: t.id, ref });
-        if (t.iteration !== nextPath) out.push({ kind: "iteration", id: t.id, path: nextPath });
+        out.push({ kind: "reparent", id: t.id, ref, after: ref });
+        if (t.iteration !== nextPath) out.push({ kind: "iteration", id: t.id, path: nextPath, after: ref });
       }
     }
   }
   return out;
+}
+
+/** The ref a step makes for the steps after it: a story's move or a copy (a reparent only uses one). */
+const madeRef = (s: CleanupStep): string | undefined => (s.kind === "reparent" ? undefined : s.ref);
+
+/**
+ * Run clean-up steps in order: a step whose `after` step failed is skipped (its `skip` answer), so the
+ * tasks of a story that did not move stay with it, and nothing goes under a copy that was not made.
+ */
+export function guardSteps<A, R>(steps: CleanupStep[], run: (s: CleanupStep, a: A) => Promise<R>, skip: (s: CleanupStep) => R): ((a: A) => Promise<R>)[] {
+  const failed = new Set<string>();
+  return steps.map((s) => async (a: A) => {
+    if (s.kind !== "copy" && s.after && failed.has(s.after)) return skip(s);
+    try { return await run(s, a); } catch (e) { const r = madeRef(s); if (r) failed.add(r); throw e; }
+  });
 }
 
 /** A story can be split when some of its work is finished (a done task) and some is still open. */

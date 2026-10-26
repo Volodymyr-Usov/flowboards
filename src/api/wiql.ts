@@ -39,10 +39,10 @@ export function toWiql(spec: QuerySpec, currentProject: string): string {
     id: "[System.Id] ASC",
     closed: "[Microsoft.VSTS.Common.ClosedDate] DESC",
   }[spec.orderBy ?? "id"];
-  return `SELECT [System.Id] FROM WorkItems${where.length ? " WHERE " + where.join(" AND ") : ""} ORDER BY ${order}`;
+  return `SELECT [System.Id] FROM WorkItems${where.length ? " WHERE " + where.join(" AND ") : ""} ORDER BY ${order}${spec.asOf ? ` ASOF ${q(spec.asOf)}` : ""}`;
 }
 
 /** WIQL compares dates by day unless asked for time precision. */
 export function needsTimePrecision(spec: QuerySpec): boolean {
-  return [spec.changedAfter, spec.createdAfter, spec.closedAfter, spec.closedBefore].some((d) => d?.includes("T"));
+  return [spec.changedAfter, spec.createdAfter, spec.closedAfter, spec.closedBefore, spec.asOf].some((d) => d?.includes("T"));
 }

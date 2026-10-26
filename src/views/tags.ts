@@ -97,6 +97,15 @@ function tagsAudit(app: App, pane: HTMLElement, query: () => string): { start():
     return m;
   };
 
+  /** look-alike groups, worked out again only when the tags or their counts change (not on each key typed) */
+  let dupMemo: { key: string; groups: string[][] } | null = null;
+  const lookAlikes = (names: string[], counts: Map<string, number>): string[][] => {
+    const uses = (n: string): number => counts.get(lower(n)) ?? 0;
+    const key = names.map((n) => `${n}\u0001${uses(n)}`).join("\u0000");
+    if (dupMemo?.key !== key) dupMemo = { key, groups: duplicateTagGroups(names, uses) };
+    return dupMemo.groups;
+  };
+
   const countIn = async (names: string[], quiet = false): Promise<void> => {
     const todo = names.filter((n) => projectCount.get(lower(n)) === undefined);
     if (!todo.length) return;
@@ -262,7 +271,7 @@ function tagsAudit(app: App, pane: HTMLElement, query: () => string): { start():
       h("th.num", { title: "Every work item with this tag in the project (counted when you ask)" }, "Project items"),
       h("th", null, ""))),
     h("tbody", null, rows.map((t) => h("tr", null,
-      h("td", null, tagChip(t.name, `${t.name}: click to change its colour`)),
+      h("td", null, tagChip(t.name, `${t.name}: click to change its colour`, { tab: true })),
       h("td.num", null, String(counts.get(lower(t.name)) ?? 0)),
       h("td.num", null, projectCell(t)),
       h("td", null, actions(t, mergeTargets(t))))))), "au-tags");
@@ -281,7 +290,7 @@ function tagsAudit(app: App, pane: HTMLElement, query: () => string): { start():
     const byName = new Map(all.map((t) => [t.name, t]));
     const usedByTeam = (t: Tag): boolean => (counts.get(lower(t.name)) ?? 0) > 0;
     // "My team": groups with a tag the team uses, and the tags it uses (unused and rarely used are about the team already)
-    const dupGroups = duplicateTagGroups(all.map((t) => t.name)).map((g) => g.map((n) => byName.get(n)!)).filter((g) => scope === "all" || g.some(usedByTeam));
+    const dupGroups = lookAlikes(all.map((t) => t.name), counts).map((g) => g.map((n) => byName.get(n)!)).filter((g) => scope === "all" || g.some(usedByTeam));
     const pool = scope === "all" ? all : all.filter(usedByTeam);
     const unused = all.filter((t) => !counts.get(lower(t.name)));
     const rare = all.filter((t) => { const c = counts.get(lower(t.name)) ?? 0; return c > 0 && c <= RARE; });

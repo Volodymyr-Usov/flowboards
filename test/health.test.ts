@@ -107,7 +107,8 @@ test("open work in a past sprint", () => {
 test("parent and children out of step", () => {
   const f = run([
     item(1, "Item", "Done", { parent: 9 }), item(2, "Step", "Doing", { parent: 1 }), item(3, "Step", "Done", { parent: 1, remaining: 2 }),
-    item(4, "Item", "Doing", { parent: 9 }), item(5, "Step", "Done", { parent: 4 }), item(6, "Step", "Done", { parent: 4 }),
+    item(4, "Item", "Doing", { parent: 9, relations: [5, 6].map((id) => ({ rel: "System.LinkTypes.Hierarchy-Forward", url: `https://x.example/_apis/wit/workItems/${id}`, attributes: {} })) }),
+    item(5, "Step", "Done", { parent: 4 }), item(6, "Step", "Done", { parent: 4 }),
     item(7, "Item", "Idea", { parent: 9 }), item(8, "Step", "Doing", { parent: 7 }),
   ]);
   assert.deepEqual(ids(f, "doneWithOpenChildren"), [1]);
@@ -117,8 +118,18 @@ test("parent and children out of step", () => {
 });
 
 test("target date in the past", () => {
-  const f = run([item(1, "Theme", "Doing", { parent: 9, targetDate: "2026-10-20T00:00:00Z" }), item(2, "Theme", "Doing", { parent: 9, targetDate: "2026-10-21T00:00:00Z" }), item(3, "Theme", "Done", { parent: 9, targetDate: "2026-01-01T00:00:00Z" })]);
+  const f = run([item(1, "Theme", "Doing", { parent: 9, targetDate: "2026-10-20T00:00:00Z" }), item(2, "Theme", "Doing", { parent: 9, targetDate: "2026-10-21T00:00:00Z" }), item(3, "Theme", "Done", { parent: 9, targetDate: "2026-01-01T00:00:00Z" })],
+  { today: new Date(2026, 9, 21, 12).getTime() });
   assert.deepEqual(ids(f, "pastTarget"), [1]);
+});
+
+test("target date: a date saved as local midnight is that day, in any time zone", () => {
+  // Azure DevOps's own date picker saves local midnight: 20 Oct in Berlin is 2026-10-19T22:00:00Z
+  const today = new Date(2026, 9, 21, 9).getTime();
+  const at = (d: number): string => new Date(2026, 9, d).toISOString();
+  const f = run([item(1, "Theme", "Doing", { parent: 9, targetDate: at(20) }), item(2, "Theme", "Doing", { parent: 9, targetDate: at(21) })], { today });
+  assert.deepEqual(ids(f, "pastTarget"), [1]);
+  assert.match(f.find((x) => x.checkId === "pastTarget")!.message, /2026-10-20/);
 });
 
 test("first state of a category", () => {
@@ -141,7 +152,23 @@ test("tag look-alikes", () => {
     [["Perfomance", "Performance"], ["security", "Security"]]);
 });
 
+test("tag look-alike groups do not chain: each tag is like the group's most used tag", () => {
+  // abcde ~ abcdf ~ abcgf, but abcde and abcgf are two letters apart
+  assert.deepEqual(duplicateTagGroups(["abcde", "abcdf", "abcgf"]), [["abcde", "abcdf"]]);
+  // the most used tag leads: abcdf takes both of its look-alikes
+  assert.deepEqual(duplicateTagGroups(["abcde", "abcdf", "abcgf"], (n) => (n === "abcdf" ? 9 : 1)), [["abcde", "abcdf", "abcgf"]]);
+});
+
 test("replace a tag without doubles", () => {
   assert.deepEqual(replaceTag(["a", "Perf", "b"], "perf", "Performance"), ["a", "b", "Performance"]);
   assert.deepEqual(replaceTag(["Performance", "Perf"], "Perf", "performance"), ["Performance"]);
+});
+
+test("ofTeam: the team's areas (and below where it includes them); no areas means every item", async () => {
+  const { ofTeam } = await import("../src/core/scope.ts");
+  const ws = (areas: { path: string; includeChildren: boolean }[]) => ({ settings: { areas } });
+  assert.ok(ofTeam(ws([{ path: "P\\A", includeChildren: true }]), { area: "P\\A\\x" }));
+  assert.ok(!ofTeam(ws([{ path: "P\\A", includeChildren: false }]), { area: "P\\A\\x" }));
+  assert.ok(!ofTeam(ws([{ path: "P\\A", includeChildren: true }]), { area: "P\\B" }));
+  assert.ok(ofTeam(ws([]), { area: "P\\B" }));
 });

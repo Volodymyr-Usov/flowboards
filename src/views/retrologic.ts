@@ -34,6 +34,8 @@ export interface RetroBoard {
   anonymous: boolean;
   created: string;
   createdBy: string;
+  /** its notes, actions and ballots are in a collection of its own (older boards kept them with the boards) */
+  notesApart?: boolean;
 }
 
 export interface RetroNote {
@@ -63,9 +65,99 @@ export interface RetroAction {
   noteId?: string;
 }
 
-export type RetroDoc = RetroBoard | RetroNote | RetroAction;
+/**
+ * One person's votes on one board, without their name: the id is a one-way hash of the board, the
+ * person and a random salt kept in their own (personal) storage (see ballotId), so nobody can tell
+ * whose votes these are. Only this person's tabs write it.
+ */
+export interface RetroBallot {
+  id: string;
+  kind: "ballot";
+  board: string; // iteration id
+  /** note id -> votes given */
+  votes: Record<string, number>;
+}
 
+export type RetroDoc = RetroBoard | RetroNote | RetroAction | RetroBallot;
+
+/** Votes kept on the note itself, by name (older versions); new votes are in ballots. */
 export const totalVotes = (n: RetroNote): number => Object.values(n.votes ?? {}).reduce((a, b) => a + b, 0);
+
+/**
+ * The documents the page works with: the boards from the team's collection (with the notes and actions
+ * of boards not split yet), and the notes, actions and ballots of each split board from its own collection.
+ * Old copies of a split board's notes still in the team's collection are not used.
+ */
+export function mergeRetroDocs(main: RetroDoc[], own: Map<string, RetroDoc[]>): RetroDoc[] {
+  const apart = new Set(main.filter((d): d is RetroBoard => d.kind === "board" && !!d.notesApart).map((b) => b.iteration));
+  const out = main.filter((d) => d.kind === "board" || !apart.has(d.board));
+  const seen = new Set(out.map((d) => d.id));
+  for (const list of own.values()) for (const d of list) {
+    if (d.kind === "board" || seen.has(d.id)) continue;
+    seen.add(d.id);
+    out.push(d);
+  }
+  return out;
+}
+
+/** Notes and actions of a split board still only in the team's collection (written there just before the split): to copy over. */
+export function strays(main: RetroDoc[], own: RetroDoc[], iteration: string): (RetroNote | RetroAction)[] {
+  const have = new Set(own.map((d) => d.id));
+  return main.filter((d): d is RetroNote | RetroAction => (d.kind === "note" || d.kind === "action") && d.board === iteration && !have.has(d.id));
+}
+
+/** A random salt for ballotId, as 64 hex digits. */
+export function newSalt(): string {
+  return [...crypto.getRandomValues(new Uint8Array(32))].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** The id of a person's ballot on a board: "ballot-" and 40 hex digits of SHA-256(board, person, salt). */
+export async function ballotId(board: string, uniqueName: string, salt: string): Promise<string> {
+  const data = new TextEncoder().encode(`${board}\n${uniqueName.toLowerCase()}\n${salt}`);
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", data));
+  return "ballot-" + [...digest].map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 40);
+}
+
+/** Votes per note: those on the note (older, by name) and those in the ballots. */
+export function noteTotals(notes: RetroNote[], ballots: RetroBallot[]): Map<string, number> {
+  const out = new Map(notes.map((n) => [n.id, totalVotes(n)]));
+  for (const b of ballots) for (const [id, c] of Object.entries(b.votes ?? {})) if (out.has(id) && c > 0) out.set(id, out.get(id)! + c);
+  return out;
+}
+
+/** How many people voted on these notes: names on the notes (older votes) and ballots with a vote on a note still there. */
+export function voterCount(notes: RetroNote[], ballots: RetroBallot[]): number {
+  const ids = new Set(notes.map((n) => n.id));
+  const names = new Set(notes.flatMap((n) => Object.entries(n.votes ?? {}).filter(([, c]) => c > 0).map(([k]) => k.toLowerCase())));
+  return names.size + ballots.filter((b) => Object.entries(b.votes ?? {}).some(([id, c]) => c > 0 && ids.has(id))).length;
+}
+
+/** My votes on a note: on the note by name (older) and in my ballot. */
+export function myVotesOn(n: RetroNote, mine: RetroBallot | undefined, me: string): number {
+  const key = me.toLowerCase();
+  const old = Object.entries(n.votes ?? {}).find(([k]) => k.toLowerCase() === key)?.[1] ?? 0;
+  return old + Math.max(0, mine?.votes?.[n.id] ?? 0);
+}
+
+/** Votes I spent on these notes (a vote on a deleted note is free again). */
+export function myVotesUsed(notes: RetroNote[], mine: RetroBallot | undefined, me: string): number {
+  return notes.reduce((s, n) => s + myVotesOn(n, mine, me), 0);
+}
+
+/**
+ * Add (+1) or take back (-1) one vote in my ballot (made when there is none). Refuses (null) when no
+ * votes are left, or there is no vote of mine in the ballot to take back (one on the note itself, from
+ * an older version, is taken back with `vote`).
+ */
+export function ballotVote(ballot: RetroBallot | null, id: string, board: string, noteId: string, delta: 1 | -1, left: number): RetroBallot | null {
+  const b: RetroBallot = ballot ? { ...ballot, votes: { ...(ballot.votes ?? {}) } } : { id, kind: "ballot", board, votes: {} };
+  const mine = b.votes[noteId] ?? 0;
+  if (delta > 0 && left <= 0) return null;
+  if (delta < 0 && mine <= 0) return null;
+  const next = mine + delta;
+  if (next > 0) b.votes[noteId] = next; else delete b.votes[noteId];
+  return b;
+}
 
 /** Votes this person has spent on this board. */
 export function votesUsed(notes: RetroNote[], me: string): number {
@@ -87,15 +179,15 @@ export function vote(note: RetroNote, me: string, delta: 1 | -1, left: number): 
   return { ...note, votes };
 }
 
-/** Notes of a column: by votes once voting started, else newest last. */
-export function ordered(notes: RetroNote[], phase: Phase): RetroNote[] {
+/** Notes of a column: by votes once voting started, else newest last. `count` gives a note's votes. */
+export function ordered(notes: RetroNote[], phase: Phase, count: (n: RetroNote) => number = totalVotes): RetroNote[] {
   const byTime = (a: RetroNote, b: RetroNote) => a.created.localeCompare(b.created);
-  return [...notes].sort(phase === "write" ? byTime : (a, b) => totalVotes(b) - totalVotes(a) || byTime(a, b));
+  return [...notes].sort(phase === "write" ? byTime : (a, b) => count(b) - count(a) || byTime(a, b));
 }
 
 /** Every note of a board in one list to discuss: most votes first, then oldest first. */
-export function ranked(notes: RetroNote[]): RetroNote[] {
-  return [...notes].sort((a, b) => totalVotes(b) - totalVotes(a) || a.created.localeCompare(b.created));
+export function ranked(notes: RetroNote[], count: (n: RetroNote) => number = totalVotes): RetroNote[] {
+  return [...notes].sort((a, b) => count(b) - count(a) || a.created.localeCompare(b.created));
 }
 
 /** While writing, people see only their own notes; the rest show as a count. */

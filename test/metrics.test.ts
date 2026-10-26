@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  ageClass, cfdSeries, cycleDays, dailyCounts, dayIndex, dayIso, histogram, likelyAtLeast, likelyWithin, mean,
-  niceTicks, percentile, rollingMean, seededRandom, simulateHowMany, simulateWhen, stageDates,
+  ageClass, asLocal, cfdSeries, cycleDays, dailyCounts, dayIndex, dayIso, dayOfKey, histogram, likelyAtLeast, likelyWithin, mean,
+  niceTicks, noStartDate, percentile, rollingMean, seededRandom, simulateHowMany, simulateWhen, stageDates,
   weeklySums, workAge,
 } from "../src/core/metrics.ts";
 import type { FlowDates } from "../src/core/metrics.ts";
@@ -10,11 +10,21 @@ import type { FlowDates } from "../src/core/metrics.ts";
 const DAY = 86_400_000;
 const d = (iso: string): string => iso + "T12:00:00.000Z";
 
-test("dayIndex and dayIso round-trip in UTC", () => {
-  const i = dayIndex("2026-03-10T23:59:00Z");
+test("dayIndex is the local calendar day; dayIso and dayOfKey give the date back", () => {
+  // late in the evening and early in the morning of the same local day, in any time zone
+  const i = dayIndex(new Date(2026, 2, 10, 23, 59).toISOString());
   assert.equal(dayIso(i), "2026-03-10");
-  assert.equal(dayIndex("2026-03-11T00:00:00Z"), i + 1);
-  assert.equal(dayIndex(Date.parse("2026-03-10T05:00:00Z")), i);
+  assert.equal(dayIndex(new Date(2026, 2, 11, 0, 0).getTime()), i + 1);
+  assert.equal(dayIndex(new Date(2026, 2, 10, 0, 30).getTime()), i);
+  assert.equal(dayOfKey("2026-03-10"), i);
+  assert.ok(Number.isNaN(dayOfKey("not a date")));
+  // asLocal: the local time read as UTC
+  assert.equal(new Date(asLocal(new Date(2026, 2, 10, 23, 59).getTime())).toISOString().slice(0, 16), "2026-03-10T23:59");
+});
+
+test("noStartDate: cycle time falls back to the created date", () => {
+  assert.equal(noStartDate({ created: d("2026-01-01"), closed: d("2026-01-08"), category: "Completed" }), true);
+  assert.equal(noStartDate({ created: d("2026-01-01"), activated: d("2026-01-02"), closed: d("2026-01-08"), category: "Completed" }), false);
 });
 
 test("percentile interpolates between ranks", () => {

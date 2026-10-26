@@ -6,7 +6,28 @@ import type { BoardInfo, Iteration, Level, Person, ProcessInfo, TeamSettings, Wo
 import { byOrder, DAY, isRemoved, levelOf, personKey, statesOf } from "./model.ts";
 import { wsjfSetup } from "./wsjf.ts";
 
-export type ChangeListener = (changed: Set<number>, why: "load" | "poll" | "write" | "scope") => void;
+/** How far before the sync mark each poll asks again, for changes saved a moment out of order. */
+export const SYNC_OVERLAP = 2 * 60_000;
+/** Polls with the overlap: every this many (the others ask from the mark itself). */
+export const OVERLAP_EVERY = 4;
+
+/**
+ * The next sync mark: the newest change among the items read (Azure DevOps's time, so this computer's
+ * clock does not matter), less the time the query and the reads took (an item read late may hold a change
+ * newer than the query); never earlier than `old`. "" when there is nothing to go by.
+ */
+export function syncMark(old: string, items: Iterable<{ changed: string }>, elapsedMs: number): string {
+  let mark = old ? Date.parse(old) : NaN;
+  let newest = -Infinity;
+  for (const it of items) { const t = Date.parse(it.changed); if (t > newest) newest = t; }
+  if (Number.isFinite(newest)) {
+    const t = newest - Math.max(0, elapsedMs);
+    if (!(t <= mark)) mark = t;
+  }
+  return Number.isFinite(mark) ? new Date(mark).toISOString() : "";
+}
+
+export type ChangeListener =(changed: Set<number>, why: "load" | "poll" | "write" | "scope") => void;
 
 export interface WorkspaceOptions {
   /** how many days of closed items to keep (board's Closed column, recent work) */
@@ -19,6 +40,8 @@ export class Workspace {
   api: Api;
   project: string;
   projectId = "";
+  /** the team's id, when known (storage and member tweaks are kept by it) */
+  teamId = "";
   team: string;
   process!: ProcessInfo;
   settings!: TeamSettings;
@@ -47,6 +70,8 @@ export class Workspace {
   private parentFailed = new Map<number, number>();
   /** revision of items taken out (removed state, left the team's areas), so an older answer cannot bring them back */
   private goneRev = new Map<number, number>();
+  /** items kept by the last clean-up only because they changed lately (see dropGone) */
+  private graced = new Set<number>();
 
   constructor(api: Api, project: string, team: string, opts: Partial<WorkspaceOptions> = {}) {
     this.api = api;
@@ -99,14 +124,16 @@ export class Workspace {
       this.projectId = projects.find((p) => p.name === this.project)?.id ?? "";
       const req = this.requirementLevel();
       this.board = await api.board(this.project, this.team, req.name).catch(() => null);
-      const syncStart = new Date().toISOString();
+      const started = Date.now();
       const ids = await this.queryTeamIds();
       const items = await this.read(ids);
       this.items.clear();
       for (const it of items) if (!isRemoved(it)) this.items.set(it.id, it);
       await this.loadMissingParents();
       this.loadedAt = Date.now();
-      this.lastSync = syncStart;
+      // the sync mark is Azure DevOps's time (the newest change read), never this computer's clock;
+      // with nothing read yet, ten minutes back on this clock is the best start there is
+      this.lastSync = syncMark("", items, Date.now() - started) || new Date(Date.now() - 10 * 60_000).toISOString();
       this.setStatus("live");
       this.emit(new Set(this.items.keys()), "load");
     } catch (e) {
@@ -175,13 +202,20 @@ export class Workspace {
    * are kept, as the queries may have run before them.
    */
   private async dropGone(): Promise<number[]> {
-    const before = Date.now() - 2 * 60_000;
+    // "the last minutes" by Azure DevOps's time (the sync mark), not this computer's clock; an item is
+    // kept this way once only: by the next round, a query that ran after its change has answered
+    const recent = Date.parse(this.lastSync) - SYNC_OVERLAP;
     const inScope = new Set(await this.queryTeamIds());
     const keep = new Set<number>();
+    const graced = new Set<number>();
     for (const it of this.items.values()) {
-      if (!inScope.has(it.id) && !(Date.parse(it.changed) >= before)) continue;
+      if (!inScope.has(it.id)) {
+        if (!(Date.parse(it.changed) >= recent) || this.graced.has(it.id)) continue;
+        graced.add(it.id);
+      }
       for (let p: WorkItem | undefined = it, n = 0; p && !keep.has(p.id) && n < 20; p = this.get(p.parent), n++) keep.add(p.id);
     }
+    this.graced = graced;
     const gone = [...this.items.values()].filter((it) => !keep.has(it.id));
     for (const it of gone) { this.items.delete(it.id); this.goneRev.set(it.id, it.rev); }
     return gone.map((it) => it.id);
@@ -197,18 +231,24 @@ export class Workspace {
     try {
       const types = this.process.levels.flatMap((l) => l.types);
       const areas = this.opts.teamAreaOnly && this.settings.areas.length ? this.settings.areas : undefined;
-      const syncStart = new Date(Date.now() - 2000).toISOString();
-      const ids = await this.api.query(this.project, { types, areas, changedAfter: this.lastSync });
+      const started = Date.now();
+      // a little overlap: a change saved on another server a moment before the newest one we saw is not missed
+      // (items read again with the same revision are left out by take). Every 4th poll (about 2 minutes) only,
+      // so a bulk edit is not read again by every open page every 30 seconds.
+      const overlap = (this.pollCount + 1) % OVERLAP_EVERY === 0 ? SYNC_OVERLAP : 0;
+      const since = new Date(Date.parse(this.lastSync) - overlap).toISOString();
+      const ids = await this.api.query(this.project, { types, areas, changedAfter: since });
       // items we show from other areas (parents) are checked too
       const outside = [...this.items.values()].filter((i) => areas && !areas.some((a) => i.area === a.path || (a.includeChildren && i.area.startsWith(a.path + "\\")))).map((i) => i.id);
-      const extra = outside.length ? await this.api.query(this.project, { ids: outside, changedAfter: this.lastSync }) : [];
+      const extra = outside.length ? await this.api.query(this.project, { ids: outside, changedAfter: since }) : [];
       const all = [...new Set([...ids, ...extra])];
       const changed = new Set<number>();
-      if (all.length) for (const it of await this.read(all)) this.take(it, changed);
+      const read = all.length ? await this.read(all) : [];
+      for (const it of read) this.take(it, changed);
       if (++this.pollCount % 10 === 0) for (const id of await this.dropGone()) changed.add(id);
       for (const id of await this.loadMissingParents()) changed.add(id);
       // only now: a failed read above is asked again next time
-      this.lastSync = syncStart;
+      this.lastSync = syncMark(this.lastSync, read, Date.now() - started);
       if (this.status !== "live") this.setStatus("live");
       if (changed.size) this.emit(changed, "poll");
     } catch (e) {

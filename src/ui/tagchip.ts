@@ -60,13 +60,17 @@ export function pickTagColor(anchor: Element, name: string): void {
     h("div.tg-name", null, `Colour of “${name}”`),
     h("div.tg-row", null, TAG_COLORS.map((c, k) => sw(k + 1, c)), sw(0, "Plain grey")),
     h("button.btn.link.small", { type: "button", onclick: () => { save(name, null); close(); } }, "Automatic colour"));
-  const close = popup(anchor, content, { className: "tg-popup" });
+  const close = popup(anchor, content, { className: "tg-popup", label: `Colour of ${name}` });
 }
 
-/** A tag as a small chip (a button: a click opens the palette). Plain, with no colour and no click, when tag colours are off. */
-export function tagChip(name: string, title?: string): HTMLElement {
+/**
+ * A tag as a small chip (a button: a click opens the palette). Plain, with no colour and no click, when tag colours are off.
+ * `tab`: the keyboard reaches it with Tab (Enter opens the palette) — for a list of tags; on a card or a row the
+ * item itself takes the keys, so its tags stay out of the Tab order (the Tags page has every tag's colour).
+ */
+export function tagChip(name: string, title?: string, opts: { tab?: boolean } = {}): HTMLElement {
   if (!tagColorsOn()) return h("span.tag", { title }, name);
-  const b = h("button.tag", { type: "button", tabindex: -1, dataset: { tag: name }, title: title ?? `${name}: click to change its colour`,
+  const b = h("button.tag", { type: "button", tabindex: opts.tab ? 0 : -1, dataset: { tag: name }, title: title ?? `${name}: click to change its colour`,
     onclick: (e: Event) => { e.stopPropagation(); e.preventDefault(); pickTagColor(b, name); } }, name);
   paintTag(b, name);
   return b;

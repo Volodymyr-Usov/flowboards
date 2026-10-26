@@ -7,14 +7,17 @@
 // A page whose search only highlights (the Board) can pin it: Enter then shows only what matches,
 // until the text is cleared (the × in the field, or Esc).
 // Which side is on is kept in this browser; a page with nothing to search asks AI and highlights neither side.
+// While filters or person chips filter the page, a "Filtered: 2 · Clear" chip stays in the line: it cannot be
+// switched off and never moves under "⋯", so a filter whose own control is hidden still shows that it filters.
 import type { App } from "../app/context.ts";
 import { searchWords } from "../core/filters.ts";
 import { prefs } from "../core/settings.ts";
 import { AI_FEATURES } from "../core/ai.ts";
 import { openAskAi } from "./askai.ts";
-import { blk } from "./blocks.ts";
+import { blk, onBlocksChange } from "./blocks.ts";
 import { debounce, h, icon } from "./dom.ts";
-import type { SearchBox } from "./filterbar.ts";
+import type { FilterSource, SearchBox } from "./filterbar.ts";
+import { FILTERS_CHANGED, filterSourceOf } from "./filterbar.ts";
 
 export type FieldMode = "search" | "ask";
 export const FIELD_MODE_KEY = "field.mode";
@@ -23,6 +26,39 @@ export const FIELD_MODE_KEY = "field.mode";
 export function startMode(saved: unknown, canSearch: boolean): FieldMode {
   if (!canSearch) return "ask";
   return saved === "ask" ? "ask" : "search";
+}
+
+/** A filter part of the line: what it filters, and whether its control is switched off (it still filters). */
+export interface FilterPart { what: FilterSource["what"]; count: number; says: string[]; off: boolean }
+
+/** The "Filtered" chip: its text and its tooltip, or null when nothing filters. */
+export function filteredSummary(parts: FilterPart[]): { text: string; title: string } | null {
+  const n = parts.reduce((a, p) => a + p.count, 0);
+  if (!n) return null;
+  const hidden = parts.filter((p) => p.off && p.count);
+  const off = hidden.reduce((a, p) => a + p.count, 0);
+  const says = parts.flatMap((p) => (p.count ? p.says : []));
+  const names = [...new Set(hidden.map((p) => (p.what === "people" ? "the person chips" : "the Filter button")))];
+  const many = names.length > 1 || names[0] === "the person chips"; // "the person chips are", "the Filter button is"
+  const offText = names.length
+    ? ` ${names.join(" and ").replace(/^t/, "T")} ${many ? "are" : "is"} switched off in Settings > Menu & bars, but still filter${many ? "" : "s"} this page.`
+    : "";
+  return {
+    text: `Filtered: ${n}${off ? ` (${off} hidden)` : ""}`,
+    title: `This page is filtered: ${says.join("; ")}.${offText} Clear shows everything again.`,
+  };
+}
+
+/** The details panel's width as a CSS variable on the page (--panel-w), so the page makes room for it (10-shell.css). */
+let panelFollowed = false;
+function followPanelWidth(): void {
+  if (panelFollowed) return;
+  const panel = document.querySelector<HTMLElement>("aside.panel");
+  if (!panel) return;
+  panelFollowed = true;
+  const set = (): void => { document.body.style.setProperty("--panel-w", panel.style.width || `${panel.offsetWidth || 520}px`); };
+  set();
+  new MutationObserver(set).observe(panel, { attributes: true, attributeFilter: ["style"] });
 }
 
 export interface PageBarOpts {
@@ -55,13 +91,14 @@ export interface PageBar {
  * at the end (the controls themselves move, so they keep working there), and come back with room.
  * A placeholder keeps each one's place; a page that redraws a block drops the old copy from the panel.
  */
-function fitLine(row: HTMLElement, more: HTMLButtonElement, panel: HTMLElement): void {
+function fitLine(row: HTMLElement, more: HTMLButtonElement, panel: HTMLElement, fixed: HTMLElement, after: () => void): void {
   const moved: { el: HTMLElement; ph: Comment; at: number }[] = [];
   let queued = false;
   let open = false;
   const items = (parent: Element, out: HTMLElement[] = []): HTMLElement[] => {
     for (const c of parent.children) {
-      if (c === more || c === panel || !(c instanceof HTMLElement)) continue;
+      // the "Filtered" chip always stays in the line
+      if (c === more || c === panel || c === fixed || !(c instanceof HTMLElement)) continue;
       const d = getComputedStyle(c).display;
       if (d === "none") continue;
       if (d === "contents") items(c, out);
@@ -72,7 +109,7 @@ function fitLine(row: HTMLElement, more: HTMLButtonElement, panel: HTMLElement):
   /** the controls in the line, drawn or not (an empty bar is told by these, not by what has a size) */
   const present = (parent: Element, out: HTMLElement[] = []): HTMLElement[] => {
     for (const c of parent.children) {
-      if (c === more || c === panel || !(c instanceof HTMLElement) || c.hasAttribute("hidden") || "off" in c.dataset) continue;
+      if (c === more || c === panel || c === fixed || !(c instanceof HTMLElement) || c.hasAttribute("hidden") || "off" in c.dataset) continue;
       if (getComputedStyle(c).display === "contents") present(c, out); else out.push(c);
     }
     return out;
@@ -98,7 +135,7 @@ function fitLine(row: HTMLElement, more: HTMLButtonElement, panel: HTMLElement):
     const keep = active && row.contains(active) ? active : null;
     const caret = keep instanceof HTMLInputElement ? [keep.selectionStart, keep.selectionEnd] as const : null;
     mo.disconnect();
-    try { arrange(); } finally { mo.takeRecords(); observe(); }
+    try { after(); arrange(); } finally { mo.takeRecords(); observe(); }
     if (keep && keep.isConnected && document.activeElement !== keep) {
       keep.focus({ preventScroll: true });
       if (caret && keep instanceof HTMLInputElement && caret[0] != null) { try { keep.setSelectionRange(caret[0], caret[1]); } catch { /* not a text box */ } }
@@ -239,9 +276,34 @@ export function pageBar(app: App, opts: PageBarOpts = {}): PageBar {
   const line3 = h("div.pb-3");
   const moreBtn = h("button.btn.small.pb-more", { type: "button", hidden: true, "aria-haspopup": "true", "aria-expanded": "false" }, icon("more", 15)) as HTMLButtonElement;
   const panel = h("div.pb-more-panel", { hidden: true, role: "group", "aria-label": "More controls" });
-  const row = h("div.pb-line.pb-2", null, field, line2, line3, end, moreBtn, panel);
+
+  // ---- the "Filtered: 2 · Clear" chip: the page's filter parts tell what they filter (src/ui/filterbar.ts) ----
+  const parts = (): { src: FilterSource; off: boolean }[] => [...row.querySelectorAll<HTMLElement>("[data-blk]")].flatMap((b) => {
+    const src = filterSourceOf(b);
+    return src ? [{ src, off: b.closest("[data-off], [hidden]") != null }] : [];
+  });
+  const clearAll = (): void => { for (const p of parts()) p.src.clear(); };
+  const fText = h("span.pb-filtered-text");
+  const filtered = h("span.chip.pb-filtered", { hidden: true },
+    icon("filter", 12), fText, h("span.muted", { "aria-hidden": "true" }, "·"),
+    h("button.btn.link.small", { type: "button", title: "Remove every filter and person choice of this page", onclick: clearAll }, "Clear"));
+  const paintFiltered = (): void => {
+    const s = filteredSummary(parts().map(({ src, off }) => ({ what: src.what, count: src.count(), says: src.says(), off })));
+    // written only when it changes: the line watches its own changes
+    if (filtered.hidden !== !s) filtered.hidden = !s;
+    if (!s) return;
+    if (fText.textContent !== s.text) fText.textContent = s.text;
+    if (filtered.title !== s.title) filtered.title = s.title;
+  };
+
+  const row = h("div.pb-line.pb-2", null, field, line2, line3, filtered, end, moreBtn, panel);
   const el = h("div.page-bar", null, row);
-  fitLine(row, moreBtn, panel);
+  row.addEventListener(FILTERS_CHANGED, paintFiltered);
+  // a block switched off or on (Settings, a ×) changes the "(1 hidden)"; the listener goes once the page bar left the page
+  let shown = false;
+  const stop = onBlocksChange(() => { if (row.isConnected) { shown = true; paintFiltered(); } else if (shown) stop(); });
+  fitLine(row, moreBtn, panel, filtered, () => { shown ||= row.isConnected; paintFiltered(); });
+  followPanelWidth();
   return {
     el, line2, end, line3,
     search: {

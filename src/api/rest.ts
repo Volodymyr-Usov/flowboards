@@ -1,5 +1,5 @@
 // The Azure DevOps REST client. Runs in the browser with the signed-in person's token.
-import type { Api, ApiContext, ExtensionDoc } from "./api.ts";
+import type { Api, ApiContext, ExtensionDoc, QueryIds } from "./api.ts";
 import { LocalDocs } from "./localdocs.ts";
 import { BASE_FIELDS, normalizeItem, normalizePr, normalizeUpdate, person, personOrBlank, processFields } from "./normalize.ts";
 import { ApiError } from "./types.ts";
@@ -9,6 +9,11 @@ import { matchesNothing, needsTimePrecision, toWiql } from "./wiql.ts";
 const V = "api-version=7.1";
 const VP = (n: number): string => `api-version=7.1-preview.${n}`;
 const enc = encodeURIComponent;
+/** Azure DevOps sends at most this many ids for one query. */
+const QUERY_CAP = 20_000;
+/** ids asked in one query at most (a longer list is asked in parts) */
+const ID_CHUNK = 1000;
+const MAX_COMMENTS = 1000;
 const DAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
 
 type TokenSource = () => Promise<string>;
@@ -56,6 +61,31 @@ export function missingFieldName(message: string): string | undefined {
   return f || undefined;
 }
 
+/**
+ * Does this address belong to the organization's own Azure DevOps (its services on dev.azure.com/<org>,
+ * <org>.visualstudio.com, or the same server for Azure DevOps Server)? Only those get the person's token:
+ * an address from response data (a picture link) may point anywhere.
+ */
+export function ownsUrl(orgUrl: string, url: string): boolean {
+  let u: URL;
+  let org: URL;
+  try { u = new URL(url); org = new URL(orgUrl); } catch { return false; }
+  if (u.protocol !== org.protocol || u.username || u.password) return false;
+  const host = u.hostname.toLowerCase();
+  const orgHost = org.hostname.toLowerCase();
+  if (orgHost === "dev.azure.com") {
+    // dev.azure.com/<org>/… and the other services of the same organization (vssps.dev.azure.com/<org>/…)
+    const first = org.pathname.split("/")[1]?.toLowerCase() ?? "";
+    const sameOrg = first !== "" && (u.pathname.split("/")[1] ?? "").toLowerCase() === first;
+    return sameOrg && !u.port && (host === "dev.azure.com" || /^[a-z0-9-]+\.dev\.azure\.com$/.test(host));
+  }
+  const m = /^([^.]+)\.visualstudio\.com$/.exec(orgHost);
+  // <org>.visualstudio.com and its services (<org>.vssps.visualstudio.com)
+  if (m) return !u.port && (host === orgHost || new RegExp(`^${m[1].replace(/[^a-z0-9-]/g, "")}\\.[a-z0-9-]+\\.visualstudio\\.com$`).test(host));
+  // Azure DevOps Server: the same server only
+  return u.host.toLowerCase() === org.host.toLowerCase();
+}
+
 /** Host name of another Azure DevOps service (vssps, extmgmt) for the same organization. */
 export function serviceUrl(orgUrl: string, service: "vssps" | "extmgmt"): string {
   const u = new URL(orgUrl);
@@ -76,8 +106,12 @@ export class RestApi implements Api {
   private avatars = new Map<string, Promise<string | null>>();
   private processCache = new Map<string, Promise<ProcessInfo>>();
   private boardCache = new Map<string, { columnField?: string; doneField?: string; rowField?: string }>();
-  /** how long a read may take before it is given up (a write is never cut off: it may have happened) */
+  /** how long a read may take before it is given up */
   timeoutMs = 60_000;
+  /** how long a write may take: longer, and when it runs out the change may or may not have happened */
+  writeTimeoutMs = 120_000;
+  /** called when a query came back cut at Azure DevOps's limit (more items may exist) */
+  onQueryCut: ((spec: QuerySpec) => void) | undefined;
 
   /** "basic": the token is a personal access token (scripts and the end-to-end tests), not the host's sign-in */
   private scheme: "bearer" | "basic";
@@ -105,37 +139,43 @@ export class RestApi implements Api {
 
   /**
    * One request with the token; retries once on 401, waits on 429, and on 503 or no answer repeats reads only.
-   * A read that takes longer than `timeoutMs` is given up, so nothing waits for ever (a poll, a place in the gate).
+   * A read that takes longer than `timeoutMs` is given up, so nothing waits for ever (a poll, a place in the gate);
+   * a write gets `writeTimeoutMs`, and then a message that it may or may not be saved.
+   * The token goes only to the organization's own addresses (see ownsUrl); any other address is asked without it.
    */
   async req<T = any>(method: string, url: string, body?: unknown, contentType = "application/json", raw = false): Promise<T> {
     const repeatable = safeToRepeat(method, url);
+    const signed = ownsUrl(this.ctx.orgUrl, url);
+    const limit = repeatable ? this.timeoutMs : this.writeTimeoutMs;
     return this.gate.run(async () => {
       for (let attempt = 0; ; attempt++) {
-        const token = await this.auth(attempt === 1);
-        const ctl = repeatable ? new AbortController() : undefined;
-        const timer = ctl ? setTimeout(() => ctl.abort(), this.timeoutMs) : undefined;
-        const timedOut = (): ApiError => new ApiError(0, `Azure DevOps did not answer within ${Math.round(this.timeoutMs / 1000)} seconds.`);
+        const token = signed ? await this.auth(attempt === 1) : "";
+        const ctl = new AbortController();
+        const timer = setTimeout(() => ctl.abort(), limit);
+        const timedOut = (): ApiError => new ApiError(0, repeatable
+          ? `Azure DevOps did not answer within ${Math.round(limit / 1000)} seconds.`
+          : "Azure DevOps did not answer; the change may or may not be saved. Reload to check.");
         try {
           let res: Response;
           try {
             res = await fetch(url, {
               method,
               headers: {
-                Authorization: this.scheme === "basic" ? `Basic ${btoa(":" + token)}` : `Bearer ${token}`,
+                ...(signed ? { Authorization: this.scheme === "basic" ? `Basic ${btoa(":" + token)}` : `Bearer ${token}` } : {}),
                 Accept: raw ? "image/*,*/*" : "application/json",
                 "X-TFS-FedAuthRedirect": "Suppress",
                 ...(body !== undefined ? { "Content-Type": contentType } : {}),
               },
               body: body === undefined ? undefined : typeof body === "string" ? body : JSON.stringify(body),
-              signal: ctl?.signal,
+              signal: ctl.signal,
             });
           } catch (e) {
-            if (ctl?.signal.aborted) throw timedOut();
+            if (ctl.signal.aborted) throw timedOut();
             if (repeatable && attempt < 2) { await sleep(800 * (attempt + 1)); continue; }
             throw new ApiError(0, "Azure DevOps did not answer (network): " + (e as Error).message
               + (repeatable ? "" : ". The change may or may not be saved; reload to check."));
           }
-          if ((res.status === 401 || res.status === 203) && attempt === 0) continue;
+          if ((res.status === 401 || res.status === 203) && attempt === 0 && signed) continue;
           // 429 means the request was turned away, so any request may go again; 503 only when repeating is harmless
           if ((res.status === 429 || (res.status === 503 && repeatable)) && attempt < 3) {
             const wait = Number(res.headers.get("Retry-After")) || 2 ** attempt;
@@ -148,7 +188,7 @@ export class RestApi implements Api {
           }
           if (res.status === 204) return null as T;
           let text: string;
-          try { text = await res.text(); } catch (e) { throw ctl?.signal.aborted ? timedOut() : e; }
+          try { text = await res.text(); } catch (e) { throw ctl.signal.aborted ? timedOut() : e; }
           let json: any = null;
           try { json = text ? JSON.parse(text) : null; } catch { /* not JSON */ }
           if (!res.ok) {
@@ -335,10 +375,37 @@ export class RestApi implements Api {
 
   // ---------- work items ----------
 
-  async query(project: string, spec: QuerySpec): Promise<number[]> {
+  /**
+   * Ids of the items the spec matches. A long list of ids is asked in parts of 1,000 (one query text
+   * would grow too long) and joined. When the answer has as many ids as Azure DevOps sends at most,
+   * more may exist: the result is marked `truncated`, and `onQueryCut` hears of it.
+   */
+  async query(project: string, spec: QuerySpec): Promise<QueryIds> {
     if (matchesNothing(spec)) return [];
+    const top = spec.top ?? QUERY_CAP;
+    const ids = spec.ids ? [...new Set(spec.ids)] : undefined;
+    let out: QueryIds;
+    if (ids && ids.length > ID_CHUNK) {
+      const parts: number[][] = [];
+      for (let i = 0; i < ids.length; i += ID_CHUNK) parts.push(ids.slice(i, i + ID_CHUNK));
+      const got = await Promise.all(parts.map((part) => this.queryOnce(project, { ...spec, ids: part }, top)));
+      const all = [...new Set(got.flat())];
+      // the parts come each in order; ids can be put in order again, other orders stay part after part
+      if ((spec.orderBy ?? "id") === "id") all.sort((a, b) => a - b);
+      out = all.slice(0, top);
+      if (all.length > top || got.some((g) => g.length >= top)) out.truncated = true;
+    } else {
+      out = await this.queryOnce(project, spec, top);
+      if (out.length >= top) out.truncated = true;
+    }
+    // a limit the caller chose is its own; only the cap of Azure DevOps is told
+    if (out.truncated && spec.top == null) this.onQueryCut?.(spec);
+    return out;
+  }
+
+  private async queryOnce(project: string, spec: QuerySpec, top: number): Promise<number[]> {
     const url = spec.project === "*" ? `${this.ctx.orgUrl}_apis/wit/wiql` : `${this.p(project)}_apis/wit/wiql`;
-    const r = await this.req("POST", `${url}?$top=${spec.top ?? 20000}${needsTimePrecision(spec) ? "&timePrecision=true" : ""}&${V}`, { query: toWiql(spec, project) });
+    const r = await this.req("POST", `${url}?$top=${top}${needsTimePrecision(spec) ? "&timePrecision=true" : ""}&${V}`, { query: toWiql(spec, project) });
     return (r.workItems ?? []).map((w: any) => w.id as number);
   }
 
@@ -437,9 +504,19 @@ export class RestApi implements Api {
     return out;
   }
 
+  /** The newest comments first, page after page (200 each) up to 1,000. A Markdown comment comes as the HTML Azure DevOps made of it. */
   async comments(project: string, id: number): Promise<Comment[]> {
-    const r = await this.req("GET", `${this.p(project)}_apis/wit/workItems/${id}/comments?$top=200&order=desc&${VP(4)}`);
-    return (r.comments ?? []).map((c: any) => ({ id: c.id, text: c.text, createdBy: personOrBlank(c.createdBy), createdDate: c.createdDate, modifiedDate: c.modifiedDate }));
+    const out: Comment[] = [];
+    let cont = "";
+    do {
+      const r = await this.req("GET", `${this.p(project)}_apis/wit/workItems/${id}/comments?$top=200&order=desc&$expand=renderedText${cont ? "&continuationToken=" + enc(cont) : ""}&${VP(4)}`);
+      const page: any[] = r.comments ?? [];
+      out.push(...page.map(commentOf));
+      const next = typeof r.continuationToken === "string" ? r.continuationToken : "";
+      // a token that does not move on, or an empty page, ends the reading
+      cont = next && next !== cont && page.length ? next : "";
+    } while (cont && out.length < MAX_COMMENTS);
+    return out.slice(0, MAX_COMMENTS);
   }
 
   async addComment(project: string, id: number, html: string): Promise<Comment> {
@@ -685,3 +762,9 @@ export function iterPath(project: string, it: { path?: string; name?: string }):
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/** A comment as the app shows it: a Markdown one as the HTML Azure DevOps rendered (its text is the Markdown source). */
+function commentOf(c: any): Comment {
+  const rendered = String(c.format ?? "").toLowerCase() === "markdown" && typeof c.renderedText === "string" && c.renderedText ? c.renderedText as string : undefined;
+  return { id: c.id, text: rendered ?? c.text, createdBy: personOrBlank(c.createdBy), createdDate: c.createdDate, modifiedDate: c.modifiedDate };
+}

@@ -18,7 +18,7 @@ label.inline .lab { color: var(--muted); font-size: 12px; }
 .rail { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 6px; padding-top: 6px; }
 .rail-head, .col-head { position: sticky; top: 0; z-index: 3; height: 40px; display: flex; align-items: center; gap: 8px; background: var(--panel); border-bottom: 2px solid var(--line); font-family: var(--font-head); font-weight: 600; }
 .rail-head { margin-bottom: 4px; }
-.feat { position: relative; background: var(--feat); border: 1px solid var(--feat-line); border-radius: 16px; padding: 6px 8px 6px 12px; font-size: 12.5px; cursor: grab; transition: opacity .15s, box-shadow .15s; }
+.feat { position: relative; background: var(--fill-feat, var(--feat)); border: 1px solid var(--feat-line); border-radius: 16px; padding: 6px 8px 6px 12px; font-size: 12.5px; cursor: grab; transition: opacity .15s, box-shadow .15s; }
 .feat .f-top { display: flex; gap: 6px; align-items: flex-start; }
 .feat .f-name { flex: 1; font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; }
 .feat .f-side { display: flex; flex-direction: column; align-items: center; gap: 2px; }
@@ -34,7 +34,7 @@ label.inline .lab { color: var(--muted); font-size: 12px; }
 .feat.hot, .epic-head.hot { box-shadow: 0 0 0 2px var(--wire-hot); }
 .feat.sel { box-shadow: 0 0 0 2px var(--wire-hot), 0 4px 14px rgb(0 0 0 / .2); }
 .feat.drop { box-shadow: 0 0 0 3px var(--drop); background: color-mix(in srgb, var(--drop) 18%, var(--panel)); }
-.epic-box { border: 1.5px solid color-mix(in srgb, var(--epic) 55%, transparent); background: var(--epic-soft); border-radius: 14px; padding: 6px 6px 8px 14px; display: flex; flex-direction: column; gap: 5px; }
+.epic-box { border: 1.5px solid color-mix(in srgb, var(--epic) 55%, transparent); background: var(--fill-epic, var(--epic-soft)); border-radius: 14px; padding: 6px 6px 8px 14px; display: flex; flex-direction: column; gap: 5px; }
 .epic-box.drop { border-color: var(--drop); box-shadow: 0 0 0 2px var(--drop); }
 .epic-head { display: flex; align-items: center; gap: 6px; padding: 2px 2px 2px 0; cursor: pointer; border-radius: 8px; margin-left: -8px; }
 .ebadge { font: 700 9.5px/1 var(--font-head); letter-spacing: .08em; text-transform: uppercase; color: var(--accent-ink); background: var(--epic); border-radius: 4px; padding: 3px 5px 2px; flex: none; }
@@ -75,12 +75,16 @@ label.inline .lab { color: var(--muted); font-size: 12px; }
 .insert-mark { height: 3px; border-radius: 2px; background: var(--drop); margin: -5px 0; }
 
 /* cards */
-.card { position: relative; background: var(--card, var(--panel-2)); border: 1px solid var(--line); border-left: 4px solid var(--col, var(--line)); border-radius: 8px; padding: 6px 8px 6px 9px; cursor: grab; font-size: 12.5px;
+.card { position: relative; background: var(--fill-story, var(--card, var(--panel-2))); border: 1px solid var(--line); border-left: 4px solid var(--col, var(--line)); border-radius: 8px; padding: 6px 8px 6px 9px; cursor: grab; font-size: 12.5px;
   display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 6px;
   box-shadow: 0 1px 2px rgb(0 0 0 / .06); transition: opacity .15s, box-shadow .15s; }
 .card:hover { box-shadow: 0 2px 8px rgb(0 0 0 / .14); }
-.card.t1 { background: color-mix(in srgb, var(--warn) 12%, var(--card, var(--panel-2))); }
-.card.t2 { background: color-mix(in srgb, var(--bad) 12%, var(--card, var(--panel-2))); }
+.card.t1 { background: color-mix(in srgb, var(--warn) 12%, var(--fill-story, var(--card, var(--panel-2)))); }
+.card.t2 { background: color-mix(in srgb, var(--bad) 12%, var(--fill-story, var(--card, var(--panel-2)))); }
+/* your own strong fills (Settings > Cards > Colours) bring their own text colours, so text stays readable */
+:root.fill-story-ink .card, :root.fill-story-ink .tb-story { --ink: var(--fill-story-ink); --muted: var(--fill-story-muted); --faint: var(--fill-story-muted); color: var(--ink); }
+:root.fill-feature-ink .feat:not(.orphan) { --ink: var(--fill-feat-ink); --muted: var(--fill-feat-muted); --faint: var(--fill-feat-muted); color: var(--ink); }
+:root.fill-epic-ink .epic-box { --ink: var(--fill-epic-ink); --muted: var(--fill-epic-muted); --faint: var(--fill-epic-muted); color: var(--ink); }
 .card.closed { opacity: .75; }
 .card.hot { box-shadow: 0 0 0 2px var(--wire-hot); }
 .card.hit { box-shadow: 0 0 0 2px var(--hit); }
@@ -176,7 +180,7 @@ body.is-dragging, body.is-dragging * { cursor: grabbing !important; }
 .tb-grid { display: grid; grid-template-columns: minmax(200px, 280px) repeat(var(--tb-cols, 3), minmax(160px, 1fr)); gap: 6px 10px; align-items: stretch; }
 .tb-head { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 6px; height: 36px; background: var(--panel); border-bottom: 2px solid var(--line); font-family: var(--font-head); font-weight: 600; }
 .tb-head .dot { width: 9px; height: 9px; border-radius: 50%; }
-.tb-story { display: flex; flex-direction: column; gap: 4px; padding: 6px 8px 6px 9px; background: var(--card, var(--panel-2)); border: 1px solid var(--line); border-left: 4px solid var(--col, var(--line)); border-radius: 8px; font-size: 12.5px; min-width: 0; }
+.tb-story { display: flex; flex-direction: column; gap: 4px; padding: 6px 8px 6px 9px; background: var(--fill-story, var(--card, var(--panel-2))); border: 1px solid var(--line); border-left: 4px solid var(--col, var(--line)); border-radius: 8px; font-size: 12.5px; min-width: 0; }
 .tb-story.hit { box-shadow: 0 0 0 2px var(--hit); }
 .tb-story.done { opacity: .7; }
 .tb-story.tb-loose { border-left-color: var(--faint); }
@@ -253,8 +257,8 @@ span.c-pts { cursor: default; }
 .mini:hover .child-del, .tb-task:hover .child-del, .child-del:focus-visible { opacity: 1; }
 .mini .child-del:hover, .tb-task .child-del:hover { color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, transparent); }
 /* the Taskboard shares the Board's extras: colouring, age, pull requests, points, the bin */
-.tb-story.t1 { background: color-mix(in srgb, var(--warn) 12%, var(--card, var(--panel-2))); }
-.tb-story.t2 { background: color-mix(in srgb, var(--bad) 12%, var(--card, var(--panel-2))); }
+.tb-story.t1 { background: color-mix(in srgb, var(--warn) 12%, var(--fill-story, var(--card, var(--panel-2)))); }
+.tb-story.t2 { background: color-mix(in srgb, var(--bad) 12%, var(--fill-story, var(--card, var(--panel-2)))); }
 .tb-s-parent { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tb-s-bottom { flex-wrap: wrap; }
 .tb-t-row { display: flex; align-items: flex-start; gap: 4px; min-width: 0; }
@@ -275,3 +279,15 @@ span.c-pts { cursor: default; }
 .card.drop-task { outline: 2px dashed var(--drop); outline-offset: 2px; background: color-mix(in srgb, var(--drop) 12%, var(--card, var(--panel-2))); }
 .mini.moved .m-title { font-weight: 700; }
 .mini.moved { background: color-mix(in srgb, var(--accent) 10%, transparent); border-radius: 4px; }
+
+/* split columns: Doing on top, Done under it */
+.col.split .col-half { min-height: 60px; }
+.col.split .col-half + .col-half { border-top: 1px dashed var(--line); margin-top: 6px; }
+.col-half-head { display: flex; gap: 6px; align-items: baseline; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+.col-body.col-half.drop { background: color-mix(in srgb, var(--drop) 8%, transparent); outline: 2px dashed var(--drop); outline-offset: 2px; border-radius: 8px; }
+/* the "…" on a card: shown when the card is pointed at or focused, always on touch screens */
+.card .c-more { opacity: 0; }
+.card:hover .c-more, .card:focus-within .c-more, .card .c-more:focus-visible { opacity: 1; }
+@media (hover: none) { .card .c-more { opacity: .8; } }
+/* a touch that starts sideways drags a card; one that starts up or down scrolls the page */
+.board:not(.ro) .card, .board:not(.ro):not(.map) .rail .feat:not(.orphan) { touch-action: pan-y; }

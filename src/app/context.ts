@@ -38,6 +38,8 @@ export interface ViewHandle {
   unmount?(): void;
   /** what the top bar's Excel and Copy take from this page (null: nothing now); without it, every table shown */
   exportSheets?(): Sheet[] | null;
+  /** a quick answer to "is there anything to export?" (has the page rows?), so the top bar need not build the sheets to know */
+  hasExport?(): boolean;
 }
 
 export interface View {

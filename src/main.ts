@@ -4,7 +4,8 @@ import type { Api } from "./api/api.ts";
 import { DEMO, DemoApi } from "./api/demo.ts";
 import { readOnlyApi } from "./api/readonly.ts";
 import { RestApi } from "./api/rest.ts";
-import { applyTheme, hostIsDark, savedTheme, startApp } from "./app/app.ts";
+import type { Team } from "./api/types.ts";
+import { applyTheme, forgetTeam, hostIsDark, savedTheme, startApp, TEAM_GONE } from "./app/app.ts";
 import { prefs, syncPrefs } from "./core/settings.ts";
 import type { SavedTeams } from "./core/teampick.ts";
 import { countOpenStories, isOversized, savedTeamFor, withChoice } from "./core/teampick.ts";
@@ -34,6 +35,8 @@ async function boot(): Promise<void> {
   let api: Api;
   let project: string;
   let team: string;
+  /** the project's teams, when read here (their ids are where the team's storage is) */
+  let teams: Team[] | null = null;
   if (host) {
     const extensionId = host.extension?.publisherId && host.extension?.extensionId ? `${host.extension.publisherId}.${host.extension.extensionId}` : undefined;
     api = new RestApi({
@@ -55,9 +58,22 @@ async function boot(): Promise<void> {
     // a team just picked with the team button opens once, also in another project
     if (saved.next) { project = saved.next.project; prefs.set(key, withChoice(saved, project, saved.next.team)); }
     team = saved.next?.team ?? savedTeamFor(saved, project) ?? "";
+    // a saved team that is not there any more (renamed or deleted): forgotten, and the person chooses again
+    let gone = takeGoneNote();
+    if (team && !gone) {
+      teams = await api.teams(project).catch(() => null);
+      // a list of 1,000 may be cut: a team missing from it may still exist
+      if (teams && teams.length < 1000 && !teams.some((t) => t.name === team)) gone = team;
+    }
+    if (gone) {
+      prefs.set(key, forgetTeam(prefs.get<SavedTeams>(key, {}), project));
+      team = "";
+      teams = null;
+    }
     if (!team) {
       // no team saved for this project: ask, unless the host's team is one of yours and not too big
-      ({ project, team } = await firstTeam(params.has("readonly") ? readOnlyApi(api) : api, project, host.team?.name));
+      const note = gone ? `The team ${gone} was not found: it may have been renamed or deleted. Choose a team.` : "";
+      ({ project, team } = await firstTeam(params.has("readonly") ? readOnlyApi(api) : api, project, host.team?.name, note));
       prefs.set(key, withChoice(prefs.get<SavedTeams>(key, {}), project, team));
     }
   } else {
@@ -71,17 +87,27 @@ async function boot(): Promise<void> {
 
   // ?readonly turns every change off: for looking at real data safely
   const readOnly = params.has("readonly");
-  await startApp(readOnly ? readOnlyApi(api) : api, host, project, team, { readOnly });
+  await startApp(readOnly ? readOnlyApi(api) : api, host, project, team, { readOnly, teams });
+}
+
+/** The name of a saved team the last start did not find (the page loaded again to choose), once. */
+function takeGoneNote(): string {
+  try {
+    const t = sessionStorage.getItem(TEAM_GONE) ?? "";
+    sessionStorage.removeItem(TEAM_GONE);
+    return t;
+  } catch { return ""; }
 }
 
 /**
  * The first open in a project: the host's team opens directly when it is one of the person's teams and
- * holds at most 500 open stories; otherwise a page asks which team to open.
+ * holds at most 500 open stories; otherwise a page asks which team to open. With a note (the saved team
+ * was not found) the page always asks, and says why.
  */
-async function firstTeam(api: Api, project: string, hostTeam: string | undefined): Promise<{ project: string; team: string }> {
+async function firstTeam(api: Api, project: string, hostTeam: string | undefined, why = ""): Promise<{ project: string; team: string }> {
   const root = document.getElementById("app")!;
-  let note = "";
-  if (hostTeam) {
+  let note = why;
+  if (hostTeam && !why) {
     root.replaceChildren(h("div.boot", null, spinner("Finding your teams…")));
     const mine = await api.teams(project, { mine: true }).catch(() => []);
     if (mine.some((t) => t.name === hostTeam)) {
@@ -94,7 +120,7 @@ async function firstTeam(api: Api, project: string, hostTeam: string | undefined
     const chooser = teamChooser({ api, project, team: hostTeam, page: true, onPick: (p, t) => resolve({ project: p, team: t }) });
     root.replaceChildren(h("div.choose-page", null,
       h("h2", null, "Choose a team"),
-      h("p.muted", null, "Pick the team whose work you want to see. It is kept in this browser; change it later with the team button at the right end of the second line."),
+      h("p.muted", null, "Pick the team whose work you want to see. It is kept for you; change it later with the team button at the start of the top line."),
       note ? h("p.choose-note", { role: "alert" }, note) : null,
       chooser.el));
     chooser.focus();
