@@ -47,7 +47,7 @@ Install it for one team. If by the end of the sprint nobody is using the forecas
 - **Calendar** — target and due dates, sprint starts and ends, people's days off, team days off and team events (releases, holidays); days off go into each sprint's capacity, so sprint planning counts them. Search, person chips and filters pick which work shows; person chips also pick whose days off show. Stories the Scheduler will make show as small icons on their day.
 - **Sprint** — the sprint goal at the top, written in place; backlog and sprint side by side, with search, person chips and filters, capacity per person, burndown, and a one-page sprint report with the sprint goal, what was finished, what is still open and the numbers; print it, save it as PDF or download it as Excel. When a sprint ends, one button moves the unfinished stories and their open tasks to the next sprint, or splits a story: its open tasks go to a copy in the next sprint, its finished work stays.
 - **Retro** — sprint retrospectives: anonymous notes hidden until revealed, votes, and action items that become tasks.
-- **Estimate** — planning poker: secret votes shown at once, the agreed number saved to the story.
+- **Estimate** — planning poker: votes face down (hidden on screen), shown at once, the agreed number saved to the story.
 
 The same **filters** work on every page with work items: click a person to see only their work, right-click to hide it, or press **Filter** to filter on any property. Each page keeps its own filters.
 

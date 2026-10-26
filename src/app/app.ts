@@ -7,7 +7,7 @@ import type { HostContext } from "../host/sdk.ts";
 import { rememberIds } from "../core/teamstore.ts";
 import { Ai } from "../core/ai.ts";
 import { ChangeLog } from "../core/changelog.ts";
-import { prefs, resetLayout, Settings } from "../core/settings.ts";
+import { prefs, resetLayout, Settings, teamPeopleOf } from "../core/settings.ts";
 import type { SavedTeams } from "../core/teampick.ts";
 import { isOversized, openStoryCount, withChoice } from "../core/teampick.ts";
 import { Workspace } from "../core/workspace.ts";
@@ -71,17 +71,20 @@ export async function startApp(api: Api, host: HostContext | null, project: stri
 
   // storage (settings, rules, retrospectives, schedules…) is kept by the project's and the team's ids: known first
   const idsKey = `ids:${api.ctx.orgName}/${project}/${team}`;
+  let teamId = "";
   const loadShared = async (): Promise<void> => {
     const ids = await storageIds(api, host, project, team, opts.teams, {
       get: () => prefs.get<{ projectId?: string; teamId?: string } | undefined>(idsKey, undefined),
       set: (v) => { const was = prefs.get<{ projectId?: string; teamId?: string } | undefined>(idsKey, undefined); if (was?.projectId !== v.projectId || was?.teamId !== v.teamId) prefs.set(idsKey, v); },
     });
     if (ids.projectId) rememberIds(project, ids.projectId, team, ids.teamId);
+    teamId = ids.teamId ?? "";
     await settings.loadShared(project);
   };
   await Promise.all([settings.loadUser().catch(() => {}), loadShared().catch(() => {})]);
   const ws = new Workspace(api, project, team, { closedDays: settings.shared.closedDays });
-  ws.setTeamTweaks(settings.shared.teamPeople?.[team]);
+  ws.teamId = teamId;
+  ws.setTeamTweaks(teamPeopleOf(settings.shared, team, teamId));
   const writer = new Writer(ws, log, () => settings.shared.rules, api.ctx.me);
   writer.checklistDefaults = (type) => settings.shared.checklists?.[type] ?? [];
   const actions = new Actions(writer);
@@ -466,7 +469,7 @@ export async function startApp(api: Api, host: HostContext | null, project: stri
 
   settings.onChange(() => {
     // a teammate may have changed who counts as a member (read again every 2 minutes)
-    ws.setTeamTweaks(settings.shared.teamPeople?.[team]);
+    ws.setTeamTweaks(teamPeopleOf(settings.shared, team, teamId));
     current?.handle?.update?.(new Set(), "settings");
   });
 

@@ -12,7 +12,7 @@ import { suggestedRules } from "../core/rules.ts";
 import type { AiSettings, SharedSettings, TeamPeople } from "../core/settings.ts";
 import type { UrgencyWeights } from "../core/urgency.ts";
 import { cleanUrgency, DEFAULT_URGENCY } from "../core/urgency.ts";
-import { resetPrefs } from "../core/settings.ts";
+import { resetPrefs, teamPeopleKey, teamPeopleOf } from "../core/settings.ts";
 import type { ChildTemplate } from "../core/templates.ts";
 import { cleanTemplates, EXAMPLE_TASKS, titleKey } from "../core/templates.ts";
 import type { Child } from "../ui/dom.ts";
@@ -648,8 +648,8 @@ export const settingsView: View = {
     // ---------------- Team: who counts as a member ----------------
 
     function teamTab(): HTMLElement {
-      const key = ws.team;
-      const saved = (): TeamPeople => { const t = app.settings.shared.teamPeople?.[key]; return { off: [...(t?.off ?? [])], extra: [...(t?.extra ?? [])] }; };
+      const key = teamPeopleKey(ws.team, ws.teamId);
+      const saved = (): TeamPeople => { const t = teamPeopleOf(app.settings.shared, ws.team, ws.teamId); return { off: [...(t?.off ?? [])], extra: [...(t?.extra ?? [])] }; };
       const members = [...ws.members].sort((a, b) => a.displayName.localeCompare(b.displayName));
       const isMember = (p: Person): boolean => members.some((m) => personKey(m) === personKey(p));
       return h("div", null,
@@ -687,8 +687,9 @@ export const settingsView: View = {
         async (s) => {
           const all = { ...(app.settings.shared.teamPeople ?? {}) };
           if (s.off.length || s.extra.length) all[key] = { off: s.off, extra: s.extra }; else delete all[key];
+          if (key !== ws.team) delete all[ws.team]; // kept by the team's id from now on
           await app.actions.logged("Settings: team members changed", { type: "Settings", title: "Team" }, () => app.settings.saveShared({ teamPeople: all }));
-          ws.setTeamTweaks(app.settings.shared.teamPeople?.[key]);
+          ws.setTeamTweaks(teamPeopleOf(app.settings.shared, ws.team, ws.teamId));
           return `Saved: ${ws.teamMembers().length} people count as members of ${ws.team}`;
         }, undefined, ["teamPeople"]));
     }

@@ -152,6 +152,16 @@ export function changedParts(base: SharedSettings, newer: SharedSettings, patch:
   return Object.keys(patch).some((k) => k !== "id" && k !== "__etag" && JSON.stringify(a[k]) !== JSON.stringify(b[k]));
 }
 
+/** Where a team's member tweaks (Settings > Team) are kept: by the team's id, so a renamed team keeps them. */
+export function teamPeopleKey(team: string, teamId?: string): string {
+  return teamId ? `id:${teamId}` : team;
+}
+
+/** A team's member tweaks: kept by its id, or (saved before) by its name. */
+export function teamPeopleOf(shared: Pick<SharedSettings, "teamPeople">, team: string, teamId?: string): TeamPeople | undefined {
+  return (teamId ? shared.teamPeople?.[teamPeopleKey(team, teamId)] : undefined) ?? shared.teamPeople?.[team];
+}
+
 export const NOT_READ = "Settings could not be read, so they are not saved; reload the page.";
 const CONFLICT = "Someone else saved these settings at the same time. They were read again; make your change again.";
 const OWN_CONFLICT = "Your settings were changed in another tab; reload.";

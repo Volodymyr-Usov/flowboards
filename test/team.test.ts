@@ -58,3 +58,15 @@ test("the shared settings read safely: team people and urgency weights", () => {
   assert.equal(c.urgency.own, 90);
   assert.equal(c.urgency.deadlineMax, 100);
 });
+
+test("team member tweaks are kept by the team's id, and old ones by name are still read", async () => {
+  const { teamPeopleKey, teamPeopleOf } = await import("../src/core/settings.ts");
+  const byName = { off: ["a@x"], extra: [] };
+  const byId = { off: ["b@x"], extra: [] };
+  assert.equal(teamPeopleKey("Team A", "123"), "id:123");
+  assert.equal(teamPeopleKey("Team A"), "Team A");
+  assert.deepEqual(teamPeopleOf({ teamPeople: { "Team A": byName } }, "Team A", "123"), byName);
+  assert.deepEqual(teamPeopleOf({ teamPeople: { "Team A": byName, "id:123": byId } }, "Team A", "123"), byId);
+  assert.deepEqual(teamPeopleOf({ teamPeople: { "id:123": byId } }, "Renamed team", "123"), byId);
+  assert.equal(teamPeopleOf({ teamPeople: {} }, "Team A"), undefined);
+});

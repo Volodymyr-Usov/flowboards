@@ -38,6 +38,8 @@ export class Workspace {
   api: Api;
   project: string;
   projectId = "";
+  /** the team's id, when known (storage and member tweaks are kept by it) */
+  teamId = "";
   team: string;
   process!: ProcessInfo;
   settings!: TeamSettings;
