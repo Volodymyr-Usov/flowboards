@@ -1,7 +1,7 @@
 // "Likely done by" for each Feature and Epic: a Monte Carlo forecast from the team's daily pace.
 // Assumption (said on screen): the team works through Features in backlog order, so a Feature is done
 // when the stories of every Feature above it, and its own, are done. Pure; covered by test/forecast.test.ts.
-import { percentile, seededRandom } from "./metrics.ts";
+import { dayIndex, percentile, seededRandom } from "./metrics.ts";
 
 export interface QueueItem { id: number; remaining: number }
 export interface ItemForecast { id: number; p50: number; p85: number; p95: number }
@@ -34,13 +34,12 @@ export function queueForecast(queue: QueueItem[], samples: number[], runs = 2000
   });
 }
 
-/** Stories finished per day over the last `length` days, from their closed dates (index 0 = oldest day). */
+/** Stories finished per local calendar day over the last `length` days, from their closed dates (index 0 = oldest day). */
 export function dailyThroughput(closedDates: string[], length: number, now = Date.now()): number[] {
-  const day = 86_400_000;
-  const end = Math.floor(now / day);
+  const end = dayIndex(now);
   const out = new Array(length).fill(0);
   for (const c of closedDates) {
-    const d = Math.floor(Date.parse(c) / day);
+    const d = dayIndex(c);
     const i = length - 1 - (end - d);
     if (i >= 0 && i < length) out[i]++;
   }

@@ -76,11 +76,20 @@ export function sccs(nodes: number[], edges: Edge[]): number[][] {
 
 /** One loop per group of nodes that wait for each other: [a, b, c] means a → b → c → a. */
 export function findCycles(nodes: number[], edges: Edge[]): number[][] {
+  return findLoops(nodes, edges).map((l) => l.cycle);
+}
+
+/**
+ * Each group of nodes that wait for each other (a strongly connected group of 2 or more, or a node
+ * linked to itself): every node of the group (`members`, all of them are in a loop) and one loop
+ * through the group (`cycle`, the shortest from its lowest id) to show.
+ */
+export function findLoops(nodes: number[], edges: Edge[]): { cycle: number[]; members: number[] }[] {
   const { out } = adjacency(nodes, edges);
   const self = new Set(edges.filter((e) => e.from === e.to).map((e) => e.from));
-  const cycles: number[][] = [];
+  const cycles: { cycle: number[]; members: number[] }[] = [];
   for (const comp of sccs(nodes, edges)) {
-    if (comp.length === 1) { if (self.has(comp[0])) cycles.push([comp[0]]); continue; }
+    if (comp.length === 1) { if (self.has(comp[0])) cycles.push({ cycle: [comp[0]], members: [comp[0]] }); continue; }
     const inComp = new Set(comp);
     const s = Math.min(...comp);
     // shortest way from s back to s inside the group
@@ -98,7 +107,7 @@ export function findCycles(nodes: number[], edges: Edge[]): number[][] {
     const path: number[] = [];
     for (let n = end; n !== s && n >= 0; n = prev.get(n)!) path.push(n);
     path.push(s);
-    cycles.push(path.reverse());
+    cycles.push({ cycle: path.reverse(), members: [...comp].sort((a, b) => a - b) });
   }
   return cycles;
 }

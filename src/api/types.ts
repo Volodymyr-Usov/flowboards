@@ -196,7 +196,10 @@ export interface PullRequest {
   sourceBranch?: string;
   targetBranch?: string;
   mergeStatus?: string;
-  reviewers: { person: Person; vote: number; isRequired?: boolean; isContainer?: boolean }[];
+  /** someone set it to complete on its own once the policies (build, checks) pass */
+  autoComplete?: boolean;
+  /** hasDeclined: the reviewer declined to review */
+  reviewers: { person: Person; vote: number; isRequired?: boolean; isContainer?: boolean; hasDeclined?: boolean }[];
   url: string;
   workItemIds?: number[];
   /** the text the author wrote (Azure DevOps may cut it short in lists) */

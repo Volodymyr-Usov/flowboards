@@ -9,6 +9,7 @@ import type { View } from "../app/context.ts";
 import { textMatch } from "../core/filters.ts";
 import { dailyThroughput, queueForecast, riskOf } from "../core/forecast.ts";
 import type { ItemForecast } from "../core/forecast.ts";
+import { typeHasField } from "../core/health.ts";
 import { byOrder, isClosed, isDone, levelOf, statesOf, typeColor } from "../core/model.ts";
 import { prefs } from "../core/settings.ts";
 import { PLAN_TTL, teamPlans } from "../core/teamplans.ts";
@@ -19,11 +20,12 @@ import { pageBar } from "../ui/pagebar.ts";
 import { avatar, closePopup, empty, errorText, help, itemPicker, menu, popup, segmented, toast, toggle, typeMark } from "../ui/kit.ts";
 import type { MenuItem } from "../ui/kit.ts";
 import { addDependencyChecked, removeDependencyAny } from "./deps.ts";
-import { cleanTeams, conflictCounts, dependencies, dependencyPairs, teamKey } from "./roadmaplogic.ts";
+import { ChildCounts } from "./childcounts.ts";
+import { cleanTeams, conflictCounts, dependencies, dependencyPairs, dragsFor, teamKey } from "./roadmaplogic.ts";
 import type { Dependency, TeamRef } from "./roadmaplogic.ts";
 import type { Day, Span } from "./timeaxis.ts";
 import {
-  addMonths, dayIso, dragDays, dragSpan, fmtDay, fmtSpan, monthStart, parts, planDay, quarterStart, ticks, todayDay, union, weekday,
+  addMonths, dragDays, dragSpan, fmtDay, fmtSpan, monthStart, parts, planDay, planIso, quarterStart, ticks, todayDay, union, weekday,
 } from "./timeaxis.ts";
 
 const START = "Microsoft.VSTS.Scheduling.StartDate";
@@ -89,6 +91,9 @@ export const roadmapView: View = {
     let firstDraw = true;
     let linkToken = 0;
     let alive = true;
+    // progress counts of the children that are not loaded (closed long ago, other teams' areas), read for the bars drawn
+    const childCounts = new ChildCounts(ws, () => draw());
+    const countIds = new Set<number>();
 
     // other teams on the roadmap: chosen in the Teams popup, kept per team in this browser
     const me: TeamRef = { project: ws.project, team: ws.team };
@@ -202,6 +207,10 @@ export const roadmapView: View = {
       return m;
     }
 
+    /** Which planning date fields a type of this team's process has (a type whose fields are not known: both). */
+    const dateFields = (type: string): { start: boolean; target: boolean } =>
+      ({ start: typeHasField(ws.process, type, START), target: typeHasField(ws.process, type, TARGET) });
+
     /** Is an item in this team's area paths? */
     const inMyAreas = (it: WorkItem): boolean => {
       const a = ws.settings.areas;
@@ -262,6 +271,13 @@ export const roadmapView: View = {
           }
         };
         walk(it.id, 0);
+      }
+      // and the children that are not loaded (closed long ago, other teams' areas), once read
+      if (kind === "requirement" || kind === "portfolio") {
+        const x = childCounts.extra(it.id);
+        done += x.done;
+        total += x.total;
+        countIds.add(it.id);
       }
       if (!total) return { done: isDone(it) ? 1 : 0, total: 1 };
       return { done, total };
@@ -364,7 +380,9 @@ export const roadmapView: View = {
       to = addMonths(hi, st.zoom === "quarters" ? 3 - (parts(hi).m % 3) : 1) - 1;
       const W = Math.round((to - from + 1) * ppd);
 
+      countIds.clear();
       const canvas = h("div.rm-canvas", { style: { width: nameW + W + "px" } }, header(W), body(W));
+      childCounts.want(countIds);
       scroll.replaceChildren(canvas);
       drawLegend(portfolio, req);
       drawUnscheduled(barOf);
@@ -549,7 +567,16 @@ export const roadmapView: View = {
     }
 
     function barEl(it: WorkItem, b: Bar, r: Row): HTMLElement {
-      const fixed = ro || !!r.team; // read-only: no dragging, a click opens
+      const df = dateFields(it.type);
+      const drags = dragsFor(df);
+      // read-only, another team's, or a type without date fields: no dragging, a click opens
+      const fixed = ro || !!r.team || (!drags.start && !drags.end);
+      const canMove = drags.move;
+      const dragHow = fixed
+        ? (!ro && !r.team ? `${it.type} has no start or target date field, so its bar cannot be dragged. Click to open.` : "Click to open.")
+        : canMove ? "Drag to move, drag an end to change one date, click to open."
+          : df.target ? `Drag the right end to change the target date (${it.type} has no start date field), click to open.`
+            : `Drag the left end to change the start date (${it.type} has no target date field), click to open.`;
       const p = progress(it);
       const pct = Math.round((p.done / p.total) * 100);
       const done = isDone(it);
@@ -558,7 +585,7 @@ export const roadmapView: View = {
       const width = Math.max(4, (b.end - b.start + 1) * ppd);
       const how = b.kind === "dates" ? "" : b.kind === "partial" ? "\nOne date is missing: the other end comes from the sprints." : "\nNo dates: the bar shows the sprints of its work.";
       const tip = `${it.type} #${it.id}: ${it.title}${r.team ? `\n${teamNote(r.team)}` : ""}\n${fmtSpan(b)} · ${it.state} · ${p.total > 1 || kindOf(it) !== "requirement" ? `${p.done} of ${p.total} done` : done ? "done" : "open"}`
-        + `${late ? "\nLate: the target date has passed." : ""}${how}\n${fixed ? "Click to open." : "Drag to move, drag an end to change one date, click to open."}`;
+        + `${late ? "\nLate: the target date has passed." : ""}${how}\n${dragHow}`;
       return h("div.rm-bar", {
         role: "button", tabindex: 0,
         class: [b.kind !== "dates" && "est", late && "late", done && "done", width < 90 && "narrow", selected === it.id && "sel", r.team && "ext"],
@@ -569,14 +596,14 @@ export const roadmapView: View = {
           if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openRow(r); }
           else if (e.key === "ContextMenu" || (e.key === "F10" && e.shiftKey)) { e.preventDefault(); void itemMenu(r, e.currentTarget as Element); }
         },
-        // read-only: no dragging, so a plain click opens
-        onclick: fixed ? () => openRow(r) : undefined,
+        // no dragging, so a plain click opens; a bar that only one end of moves opens on a click off that end
+        onclick: fixed ? () => openRow(r) : !canMove ? (e: MouseEvent) => { if (!(e.target as Element).closest(".rm-h")) openRow(r); } : undefined,
       },
       h("div.rm-track", null, h("div.rm-fill", { style: { width: pct + "%" } })),
-      fixed ? null : h("div.rm-h.l", { title: "Drag to change the start date" }),
+      fixed || !df.start ? null : h("div.rm-h.l", { title: "Drag to change the start date" }),
       it.assignedTo ? avatar(app.api, it.assignedTo, 18) : null,
       h("span.rm-bt", null, it.title),
-      fixed ? null : h("div.rm-h.r", { title: "Drag to change the target date" }));
+      fixed || !df.target ? null : h("div.rm-h.r", { title: "Drag to change the target date" }));
     }
 
     /** The diamond at the day the item will likely be done (85 of 100 futures), red when after its target. */
@@ -661,13 +688,13 @@ export const roadmapView: View = {
       if (!list.length) { unsched.replaceChildren(); return; }
       unsched.replaceChildren(
         h("h3", null, `Unscheduled (${list.length})`, " ", help("No start or target date, and nothing under it is in a sprint. Drag one onto the time line to give it dates.")),
-        h("div.rm-chips", null, list.map((it) => h("div.rm-chip", {
-          draggable: ro ? undefined : "true", tabindex: 0, role: "button",
-          title: ro ? `${it.type} #${it.id}: ${it.title}. Click to open.` : `${it.type} #${it.id}: ${it.title}. Drag onto the time line to give it dates; click to open.`,
+        h("div.rm-chips", null, list.map((it) => { const df = dateFields(it.type); const can = !ro && (df.start || df.target); return h("div.rm-chip", {
+          draggable: can ? "true" : undefined, tabindex: 0, role: "button",
+          title: !can ? `${it.type} #${it.id}: ${it.title}.${ro ? "" : ` ${it.type} has no start or target date field, so it cannot get dates here.`} Click to open.` : `${it.type} #${it.id}: ${it.title}. Drag onto the time line to give it dates; click to open.`,
           ondragstart: (e: DragEvent) => { e.dataTransfer?.setData("application/x-roadmap-item", String(it.id)); e.dataTransfer?.setData("text/plain", `#${it.id} ${it.title}`); if (e.dataTransfer) e.dataTransfer.effectAllowed = "move"; },
           onclick: () => app.openItem(it.id),
           onkeydown: (e: KeyboardEvent) => { if (e.key === "Enter") app.openItem(it.id); },
-        }, typeMark(ws, it.type), h("span", null, it.title), h("span.mono.muted", null, String(it.id))))));
+        }, typeMark(ws, it.type), h("span", null, it.title), h("span.mono.muted", null, String(it.id))); })));
     }
 
     // ---------- dependencies ----------
@@ -843,6 +870,8 @@ export const roadmapView: View = {
       e.preventDefault();
       bar.focus({ preventScroll: true });
       const mode = target.closest(".rm-h.l") ? "start" : target.closest(".rm-h.r") ? "end" : "move";
+      // only the dates the type has can be dragged (a click opens the item instead)
+      if (!dragsFor(dateFields(ws.get(id)?.type ?? ""))[mode]) return;
       drag = { id, bar, mode, x0: e.clientX, pointerId: e.pointerId, from: b, now: { start: b.start, end: b.end }, moved: false };
       bar.setPointerCapture(e.pointerId);
       bar.addEventListener("pointermove", onPointerMove);
@@ -913,13 +942,18 @@ export const roadmapView: View = {
       if (redrawAfterDrag) { redrawAfterDrag = false; draw(); }
     }
 
-    /** Save new dates. Both dates are written when one of them was missing. */
+    /**
+     * Save new dates: only the date fields the type has; both are written when one of them was missing.
+     * Written as local midnight, the way Azure DevOps's own date picker saves a date.
+     */
     async function schedule(id: number, s: Span, writeBoth: boolean): Promise<void> {
       const it = ws.get(id);
       if (!it) return;
+      const df = dateFields(it.type);
+      if (!df.start && !df.target) { toast(`${it.type} has no start or target date field.`, { kind: "error" }); draw(); return; }
       const changes: { field: string; value: unknown }[] = [];
-      if (writeBoth || !it.startDate || planDay(it.startDate) !== s.start) changes.push({ field: START, value: dayIso(s.start) });
-      if (writeBoth || !it.targetDate || planDay(it.targetDate) !== s.end) changes.push({ field: TARGET, value: dayIso(s.end) });
+      if (df.start && (writeBoth || !it.startDate || planDay(it.startDate) !== s.start)) changes.push({ field: START, value: planIso(s.start) });
+      if (df.target && (writeBoth || !it.targetDate || planDay(it.targetDate) !== s.end)) changes.push({ field: TARGET, value: planIso(s.end) });
       if (!changes.length) { draw(); return; }
       const res = await app.actions.setFields(id, changes, `#${id} ${it.title.length > 40 ? it.title.slice(0, 38) + "…" : it.title}: ${fmtSpan(s)}`);
       if (!res) draw(); // refused: put the bar back
@@ -1014,6 +1048,7 @@ export const roadmapView: View = {
     return {
       // stories closing or moving change the forecast: work it out again (one query)
       update(changed) {
+        childCounts.changed(changed);
         if (changed.size && st.forecast) { fcLoaded = false; fcDirty = fcLoading; }
         fb.refresh();
         draw();
@@ -1028,6 +1063,7 @@ export const roadmapView: View = {
       },
       unmount() {
         alive = false;
+        childCounts.stop();
         planToken++;
         endDrag();
         linkToken++;

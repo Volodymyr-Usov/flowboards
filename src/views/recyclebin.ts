@@ -22,6 +22,8 @@ export function binMatch(d: DeletedItem, query: string): boolean {
 
 /** Rows drawn at first, and added by each "Show more" */
 export const BIN_PAGE = 100;
+/** "My team": areas read (one call each) before asking whether to read more */
+export const AREA_READS = 1000;
 
 export const recycleBinView: View = {
   id: "recycle",
@@ -44,6 +46,8 @@ export const recycleBinView: View = {
     let scope: Scope = prefs.get<Scope>(SCOPE_KEY, "team") === "all" ? "all" : "team";
     const areas = new Map<number, string | null>(); // null: could not be read
     const asking = new Set<number>();
+    // Azure DevOps gives a deleted item's area only one item per call: at most this many calls, then the person decides
+    let areaBudget = AREA_READS;
     let limit = BIN_PAGE;
     const teamAreas = ws.settings.areas;
     const body = h("div.rb");
@@ -70,6 +74,7 @@ export const recycleBinView: View = {
       list = null;
       error = null;
       areas.clear();
+      areaBudget = AREA_READS;
       limit = BIN_PAGE;
       draw();
       try {
@@ -106,11 +111,21 @@ export const recycleBinView: View = {
       const mine = byTeam ? matching.filter((d) => { const a = areas.get(d.id); return typeof a === "string" && inTeamAreas(a, teamAreas); }) : matching;
       const shown = mine.slice(0, limit);
       const unread = byTeam ? matching.filter((d) => !areas.has(d.id)).length : 0;
+      // the reads stopped at the budget: say so, and offer the next ones
+      const paused = unread > 0 && areas.size >= areaBudget;
+      const readMore = (): HTMLElement => h("button.btn", {
+        type: "button", title: `Read the areas of ${Math.min(AREA_READS, unread).toLocaleString()} more deleted items (one call each) to find more of ${ws.team}'s`,
+        onclick: () => { areaBudget = areas.size + AREA_READS; draw(); },
+      }, `Read ${Math.min(AREA_READS, unread).toLocaleString()} more`);
       status.textContent = byTeam
-        ? `${mine.length} of ${list.length} deleted · ${ws.team}${unread ? ` · reading areas… ${unread} left` : ""}`
+        ? `${mine.length} of ${list.length} deleted · ${ws.team}${paused ? ` · stopped after reading ${areas.size.toLocaleString()} areas, ${unread.toLocaleString()} not read` : unread ? ` · reading areas… ${unread} left` : ""}`
         : q ? `${matching.length} of ${list.length}` : `${list.length} deleted`;
       if (!list.length) { body.replaceChildren(empty("The Recycle Bin is empty", "Work items deleted in this project show here, so they can be restored.")); return; }
       if (!shown.length) {
+        if (paused) {
+          body.replaceChildren(h("div.rb-more", null, h("span.small.muted", null, `None of ${ws.team}'s found in the ${areas.size.toLocaleString()} newest deleted items. `), readMore()));
+          return;
+        }
         if (unread) { body.replaceChildren(spinner(`Finding the items of ${ws.team}…`)); readAreas(matching, shown.length); return; }
         body.replaceChildren(empty("Nothing matches", byTeam ? `No deleted item of ${ws.team}${q ? " matches" : ""}. Choose “Project” to see every deleted item.` : "Change or clear the search."));
         return;
@@ -144,16 +159,22 @@ export const recycleBinView: View = {
       const more = mine.length > shown.length || (byTeam && unread)
         ? h("div.rb-more", null,
           mine.length > shown.length ? h("button.btn", { type: "button", onclick: () => { limit += BIN_PAGE; draw(); } }, `Show ${Math.min(BIN_PAGE, mine.length - shown.length)} more`) : null,
-          h("span.small.muted", null, `${shown.length} of ${mine.length}${byTeam && unread ? " so far" : ""} shown, newest first`))
+          paused && mine.length <= shown.length ? readMore() : null,
+          h("span.small.muted", null, `${shown.length} of ${mine.length}${byTeam && unread ? " so far" : ""} shown, newest first${paused ? ` (the areas of ${unread.toLocaleString()} older deleted items are not read)` : ""}`))
         : null;
       body.replaceChildren(h("div.rb-scroll", null, sortable(table, "recycle")), more ?? "");
       if (byTeam) readAreas(matching, shown.length);
     }
 
-    /** Read the areas of the next deleted items (newest first, eight at a time) until the rows to show are found. */
+    /**
+     * Read the areas of the next deleted items (newest first, eight at a time) until the rows to show are found,
+     * at most `areaBudget` in all (Azure DevOps has no call that gives many deleted items' areas at once).
+     */
     function readAreas(matching: DeletedItem[], have: number): void {
       if (have >= limit) return;
-      const next = matching.filter((d) => !areas.has(d.id) && !asking.has(d.id)).slice(0, 8);
+      const room = areaBudget - areas.size - asking.size;
+      if (room <= 0) return;
+      const next = matching.filter((d) => !areas.has(d.id) && !asking.has(d.id)).slice(0, Math.min(8, room));
       if (!next.length) return;
       for (const d of next) asking.add(d.id);
       void Promise.all(next.map(async (d) => {

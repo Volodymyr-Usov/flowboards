@@ -25,8 +25,11 @@ test("no progress in the past gives no forecast", () => {
 });
 
 test("daily throughput counts closed dates per day, oldest first", () => {
-  const now = Date.parse("2026-10-21T12:00:00Z");
-  assert.deepEqual(dailyThroughput(["2026-10-21T08:00:00Z", "2026-10-21T09:00:00Z", "2026-10-19T10:00:00Z", "2026-09-01T00:00:00Z"], 4, now), [0, 1, 0, 2]);
+  const local = (d: number, hh: number, m = 9) => new Date(2026, m, d, hh, 30).toISOString();
+  const now = new Date(2026, 9, 21, 12).getTime();
+  assert.deepEqual(dailyThroughput([local(21, 8), local(21, 9), local(19, 10), local(1, 0, 8)], 4, now), [0, 1, 0, 2]);
+  // local calendar days: a story closed late in the evening counts on that day, in any time zone
+  assert.deepEqual(dailyThroughput([local(20, 23), local(21, 0)], 2, new Date(2026, 9, 21, 12).getTime()), [1, 1]);
   assert.equal(riskOf(10, 9), "late");
   assert.equal(riskOf(9, 9), "ok");
   assert.equal(riskOf(9, null), "none");
