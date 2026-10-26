@@ -3,11 +3,12 @@
 // gets it, tasks, where it goes). Anyone in the team can edit them. The stories are made by whoever has
 // Flowboards open (src/app/scheduler.ts); stories missed meanwhile are made later, up to a week back.
 import type { View } from "../app/context.ts";
-import { loadSchedules, produce, runId, runStore, SCHEDULED_EVENT, scheduleStore } from "../app/scheduler.ts";
-import type { RunDoc } from "../app/scheduler.ts";
+import { loadSchedules, produce, removeRuns, runStore, SCHEDULED_EVENT, scheduleStore } from "../app/scheduler.ts";
+import { hasStory, runFor, runId } from "../core/schedrun.ts";
+import type { RunDoc } from "../core/schedrun.ts";
 import { every, newDocId } from "../core/teamstore.ts";
 import {
-  blankSchedule, describeTrigger, dueOccurrences, nextOccurrence, scheduleProblem, todayLocal, weekdayName,
+  applyEdit, blankSchedule, cleanSchedule, describeTrigger, dueOccurrences, nextOccurrence, scheduleProblem, todayLocal, weekdayName,
 } from "../core/scheduler.ts";
 import type { Schedule, Template, Trigger } from "../core/scheduler.ts";
 import { cleanTemplates, EXAMPLE_TASKS } from "../core/templates.ts";
@@ -83,8 +84,8 @@ export const schedulerView: View = {
       const ctx = { iterations: ws.iterations };
       const today = todayLocal();
       const mine = runs.filter((r) => r.scheduleId === s.id);
-      const done = mine.filter((r) => r.state === "done").sort((a, b) => b.date.localeCompare(a.date) || b.at.localeCompare(a.at));
-      const due = dueOccurrences(s, ctx, today).filter((o) => !mine.some((r) => r.id === runId(s.id, o.key)));
+      const done = mine.filter(hasStory).sort((a, b) => b.date.localeCompare(a.date) || b.at.localeCompare(a.at));
+      const due = dueOccurrences(s, ctx, today).filter((o) => !runFor(mine, s.id, o) && !mine.some((r) => r.id === runId(s.id, o.key)));
       const next = nextOccurrence(s, ctx, today);
       const state = !s.enabled ? "Paused" : due.length ? `${due.length} due now: made as soon as a page is open` : next ? `Next: ${when(next.date)}` : "Nothing left to make";
       const last = done[0];
@@ -128,13 +129,19 @@ export const schedulerView: View = {
     }
 
     async function toggle(s: Schedule, on: boolean): Promise<void> {
-      try { await scheduleStore(app).update(s.id, (d) => ({ ...d, enabled: on })); } catch (e) { toast(errorText(e), { kind: "error" }); }
+      // turned back on: it starts from today, so the paused days are not filled in
+      const today = todayLocal();
+      try { await scheduleStore(app).update(s.id, (d) => ({ ...d, enabled: on, activeFrom: on && d.enabled === false ? today : d.activeFrom })); } catch (e) { toast(errorText(e), { kind: "error" }); }
       await load();
     }
 
     async function remove(s: Schedule): Promise<void> {
       if (!(await confirm("Delete this schedule?", `"${s.name}" stops making stories. The ones it made stay where they are.`, "Delete", true))) return;
-      try { await scheduleStore(app).remove(s.id); } catch (e) { toast(errorText(e), { kind: "error" }); }
+      try {
+        await scheduleStore(app).remove(s.id);
+        // its records go too (the stories stay); one left behind is cleaned up later
+        await removeRuns(app, s.id, runs);
+      } catch (e) { toast(errorText(e), { kind: "error" }); }
       await load();
     }
 
@@ -200,7 +207,7 @@ export const schedulerView: View = {
         refresh();
       };
       const refresh = (): void => {
-        const probe: Schedule = { ...s, trigger: trigger(), created: today };
+        const probe: Schedule = { ...s, trigger: trigger(), activeFrom: today };
         try {
           const next = nextOccurrence(probe, { iterations: ws.iterations }, today);
           const todayIsDue = dueOccurrences(probe, { iterations: ws.iterations }, today).some((o) => o.date === today);
@@ -262,7 +269,10 @@ export const schedulerView: View = {
       // where the story goes: the sprint by a rule, or one chosen sprint; and the column (state) it starts in
       const sprints = ws.iterations.filter((i) => i.start && i.finish).sort((a, b) => Date.parse(a.start!) - Date.parse(b.start!));
       const current = s.template.placement === "fixed" ? `fixed:${s.template.iteration}` : s.template.placement;
-      const placement = sel<string>([...PLACEMENT, ...sprints.map((i) => ({ value: `fixed:${i.path}`, label: `Sprint: ${i.name}` }))], current);
+      // a chosen sprint the team no longer has stays chosen (and says so), instead of quietly becoming "the backlog"
+      const gone = s.template.placement === "fixed" && !sprints.some((i) => i.path === s.template.iteration)
+        ? [{ value: current, label: `Sprint: ${s.template.iteration.split("\\").pop()} (no longer in the team)` }] : [];
+      const placement = sel<string>([...PLACEMENT, ...sprints.map((i) => ({ value: `fixed:${i.path}`, label: `Sprint: ${i.name}` })), ...gone], current);
       const columns = boardColumns(ws.process, ws.requirementLevel(), ws.board, app.settings.shared.boardMode === "states" || !ws.board?.columnField ? "states" : "columns");
       const column = sel<string>([{ value: "", label: "Where a new story starts (New)" }, ...columns.map((c) => ({ value: c.name, label: c.name }))], columns.some((c) => c.name === s.template.column) ? s.template.column : "");
       const tags = input({ type: "text", value: s.template.tags.join(", "), placeholder: "Scheduled is always added", "aria-label": "More tags" });
@@ -272,7 +282,7 @@ export const schedulerView: View = {
         h("h4.sch-sub", null, "When"),
         row("It is made", kind), whenBox, preview,
         h("h4.sch-sub", null, "The story"),
-        row("Title", title), h("p.small.muted", null, "Tokens: {date} {day} {week} {month} {quarter} {year} {sprint}"),
+        row("Title", title), h("p.small.muted", null, "Tokens: {date} {day} {week} {weekyear} {month} {quarter} {year} {sprint}. {week} is the ISO week; write {weekyear} with it (30 Dec 2024 is week 1 of 2025), {year} is the calendar year. An outlook's tokens tell its target date."),
         row("Description", text),
         row("Assigned to", assign), assignBox,
         row("Tasks", tasksMode), taskBox,
@@ -296,7 +306,8 @@ export const schedulerView: View = {
           tags: tags.value.split(",").map((x) => x.trim()).filter(Boolean),
         },
       });
-      const baseline = JSON.stringify(read());
+      const before = read();
+      const baseline = JSON.stringify(before);
 
       let saved = false;
       await dialog(existing ? "Edit the schedule" : "New schedule", form, [
@@ -308,11 +319,29 @@ export const schedulerView: View = {
             const why = scheduleProblem(next);
             if (why) { toast(why, { kind: "error" }); return false; }
             if (next.template.tasks.mode === "custom" && !next.template.tasks.custom.length) { toast("Write at least one task, or choose another way.", { kind: "error" }); return false; }
+            // only what this form changed goes onto the stored copy, so a change someone else saved meanwhile stays
+            let gone = false;
+            let clash = "";
             try {
-              await scheduleStore(app).upsert(next.id, (cur) => ({ ...next, created: cur?.created ?? next.created, by: cur?.by ?? app.api.ctx.me?.displayName, __etag: cur?.__etag }));
-              saved = true;
-              return true;
+              await scheduleStore(app).upsert(next.id, (cur) => {
+                gone = false;
+                clash = "";
+                if (!existing) return cur ? null : { ...next, created: today, activeFrom: today, by: app.api.ctx.me?.displayName };
+                if (!cur) { gone = true; return null; }
+                const merged = applyEdit(cur, before, next, today);
+                const clean = cleanSchedule(merged);
+                clash = clean ? scheduleProblem(clean) : "the schedule could not be read";
+                return clash ? null : merged;
+              });
             } catch (e) { toast(errorText(e), { kind: "error" }); return false; }
+            if (gone) {
+              toast("This schedule was deleted meanwhile, so your changes were not saved.", { kind: "error" });
+              void load();
+              return true;
+            }
+            if (clash) { toast(`Someone changed this schedule meanwhile; with your changes: ${clash}`, { kind: "error" }); return false; }
+            saved = true;
+            return true;
           },
         },
       ], { wide: true, dirty: () => JSON.stringify(read()) !== baseline });

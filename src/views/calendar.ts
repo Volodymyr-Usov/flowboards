@@ -5,7 +5,8 @@
 // or onto it to clear the date. Click a day to add a day off or an event there.
 import type { Capacity, Iteration, Person, WorkItem } from "../api/types.ts";
 import type { App, View } from "../app/context.ts";
-import { loadSchedules, runId, runStore } from "../app/scheduler.ts";
+import { loadSchedules, runStore } from "../app/scheduler.ts";
+import { runFor } from "../core/schedrun.ts";
 import { textMatch } from "../core/filters.ts";
 import { occurrences, renderTitle } from "../core/scheduler.ts";
 import type { Occurrence, Schedule } from "../core/scheduler.ts";
@@ -379,7 +380,7 @@ export const calendarView: View = {
           for (const occ of occurrences(s, { iterations: ws.iterations }, dayKey(r.start), dayKey(r.end))) {
             const day = planDay(occ.date);
             if (day == null) continue;
-            const made = runs.find((x) => x.id === runId(s.id, occ.key) && x.state === "done")?.itemId;
+            const made = runFor(runs, s.id, occ)?.itemId;
             map.set(day, [...(map.get(day) ?? []), { schedule: s, occ, made }]);
           }
         }
