@@ -28,7 +28,7 @@ Your board, backlog and sprints tell you *what* the work is. The questions a tea
 - **Least access.** It reads and writes work items, reads pull requests, and never gets permission to change your code.
 - **Nothing to run.** No server, no token to paste: it uses your own Azure DevOps sign-in, in your browser. Your data stays in Azure DevOps.
 - **Any process.** Agile, Scrum, Basic, CMMI and inherited processes, light and dark.
-- **Open and tested.** MIT-licensed code your security team can read, checked every night against live Azure DevOps projects.
+- **Open and tested.** MIT-licensed code your security team can read, unit-tested on every change, and checked every night against live Azure DevOps test projects.
 
 Azure DevOps's own boards, burndown, velocity and Delivery Plans stay where they are. Flowboards adds to them; it does not replace them.
 
