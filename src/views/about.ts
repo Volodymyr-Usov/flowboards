@@ -9,6 +9,8 @@ import { pageBar } from "../ui/pagebar.ts";
 /** where the code lives, and who wrote it */
 export const REPO = "https://github.com/Volodymyr-Usov/flowboards";
 export const AUTHOR = { name: "Volodymyr Usov", url: "https://usovvova.com" };
+/** the website: what Flowboards does, a live demo on made-up data, and what it adds to Azure DevOps */
+export const WEBSITE = { home: "https://flowboards.dev/", demo: "https://flowboards.dev/demo/", features: "https://flowboards.dev/features/" };
 
 /** The author's small photo: images/author.jpg, else images/author.png, from the package (nothing is fetched from the web); initials when neither is there. */
 function authorPhoto(): HTMLElement {
@@ -38,7 +40,11 @@ export const aboutView: View = {
         h("div", null,
           h("h1", null, "Flowboards"),
           h("p", null, "A team's work in one place inside Azure DevOps: board, taskboard and story map, backlog, roadmap, dependencies, calendar, story scheduler, sprint, flow, pull requests, strategy, health and tags. Free and open source."),
-          h("p.small.muted", null, "Version ", h("span.mono", null, version)))),
+          h("p.small.muted", null, "Version ", h("span.mono", null, version)),
+          h("div.ab-actions", null,
+            h("a.btn.primary", { href: WEBSITE.home, target: "_blank", rel: "noopener", title: "Open the Flowboards website: flowboards.dev" }, icon("external", 14), "flowboards.dev"),
+            h("a.btn", { href: WEBSITE.demo, target: "_blank", rel: "noopener", title: "Open the live demo on flowboards.dev: made-up data, safe to try, nothing to install" }, icon("external", 14), "Live demo"),
+            h("a.btn", { href: WEBSITE.features, target: "_blank", rel: "noopener", title: "What Flowboards adds to Azure DevOps, on flowboards.dev" }, icon("external", 14), "What it adds to Azure DevOps")))),
       h("section.card-box.ab-author", null,
         authorPhoto(),
         h("div", null,
@@ -61,7 +67,8 @@ export const aboutView: View = {
         h("h3", null, "Privacy"),
         h("ul.ab-list", null,
           h("li", null, "Flowboards runs in your browser, inside Azure DevOps, with your own sign-in. It has no server."),
-          h("li", null, "Your data stays in your Azure DevOps organization: settings, rules, checklists and your own screen choices are kept in this extension's storage there."),
+          h("li", null, "Your data stays in your Azure DevOps organization: settings, rules, checklists, schedules, retros, poker votes and your own screen choices are kept in this extension's storage there."),
+          h("li", null, "The team's part of that storage can be read by people in your organization who have the extension. Retro notes and poker votes are hidden on screen until revealed, not locked away."),
           h("li", null, "It reads code (pull requests) but never changes it."),
           h("li", null, "No tracking and no telemetry: nothing is sent anywhere else."),
           AI_FEATURES ? h("li", null, "AI help is off unless you add your own key. Then only the text you ask about goes to the provider you picked.") : null))));

@@ -29,7 +29,7 @@ async function filesUnder(rel) {
   return out;
 }
 
-const TYPES = { ".html": "text/html", ".png": "image/png", ".md": "text/markdown", ".js": "application/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".json": "application/json", ".vsixmanifest": "text/xml", ".vsomanifest": "application/json" };
+const TYPES = { ".html": "text/html", ".png": "image/png", ".gif": "image/gif", ".jpg": "image/jpeg", ".md": "text/markdown", ".js": "application/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".json": "application/json", ".vsixmanifest": "text/xml", ".vsomanifest": "application/json" };
 
 export async function makeVsix() {
   const m = JSON.parse(await readFile(path.join(root, "vss-extension.json"), "utf8"));
