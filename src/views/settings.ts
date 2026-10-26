@@ -24,6 +24,8 @@ import { avatar, busy, confirm, errorText, help, personPicker, segmented, select
 import type { PrShow } from "./boardmodel.ts";
 import { boardColumns } from "./boardmodel.ts";
 import { boardScope, columnHidden, columnShownPatch, readBoardOpts, saveBoardOpts } from "./boardprefs.ts";
+import type { Fill, FillPart } from "./cardfill.ts";
+import { applyFills, DEFAULT_STRENGTH } from "./cardfill.ts";
 import { pageBar } from "../ui/pagebar.ts";
 import type { PillarDraft } from "./pillareditor.ts";
 import { checkPillars, pillarDraft, pillarEditor, savePillars } from "./pillareditor.ts";
@@ -541,7 +543,53 @@ export const settingsView: View = {
             epic && feat ? sw(epic.name, "roadmap", o.epics, `Group the ${feat.defaultType} list in ${epic.defaultType} boxes (on the story map: under their ${epic.defaultType}). Switching it off ungroups; the eye on a box does the same.`, (v) => saveBoardOpts(v ? { epics: true, features: true } : { epics: false })) : null,
             feat ? sw(feat.name, "tree", o.features, `The ${feat.defaultType} list and the lines from it to the cards. Switching it off gives the columns the full width.`, (v) => saveBoardOpts({ features: v, epics: v ? o.epics : false })) : null,
             feat ? sw("Empty", "filter", o.empty, `Also list open ${feat.name} that have no ${low} yet, so they can be planned from the Board.`, (v) => saveBoardOpts({ empty: v })) : null,
-          ])));
+          ]),
+          fillsCard(epic?.defaultType, feat?.defaultType, req.defaultType)));
+    }
+
+    /**
+     * Your own fill colours of the Epic box, the Feature card and the story card. A colour is blended into
+     * the theme's own fill by its strength, so it works in light and dark; the sample shows it at once.
+     */
+    function fillsCard(epicType: string | undefined, featType: string | undefined, storyType: string): HTMLElement {
+      const parts: { part: FillPart; label: string; base: string }[] = [
+        ...(epicType ? [{ part: "epic" as const, label: `${epicType} box`, base: "#c8660f" }] : []),
+        ...(featType ? [{ part: "feature" as const, label: `${featType} card`, base: "#3a78c2" }] : []),
+        { part: "story", label: `${storyType} card`, base: "#6b7a90" },
+      ];
+      const box: HTMLElement & { paint?: () => void } = live(() => {
+        const o = readBoardOpts();
+        const fills = { ...o.fills };
+        applyFills(fills); // the sample shows what is saved, also before the Board was opened
+        const save = (part: FillPart, f: Fill | undefined): void => {
+          if (f) fills[part] = f; else delete fills[part];
+          saveBoardOpts({ fills: { ...fills } });
+          applyFills(fills);
+        };
+        const rows = parts.map(({ part, label, base }) => {
+          const cur = fills[part];
+          const color = h("input.set-fill-color", { type: "color", value: cur?.color ?? base, title: `Choose the fill colour of the ${label}`, "aria-label": `${label}: colour` }) as HTMLInputElement;
+          const strength = h("input.set-fill-strength", { type: "range", min: 10, max: 100, step: 5, value: cur?.strength ?? DEFAULT_STRENGTH, title: `How strong the colour is: low keeps the theme's own fill, 100% is the colour itself`, "aria-label": `${label}: strength` }) as HTMLInputElement;
+          const pct = h("span.small.muted.set-fill-pct", null, cur ? `${cur.strength}%` : "Theme");
+          const now = (): Fill => ({ color: color.value, strength: Number(strength.value) });
+          // while dragging or picking: the sample changes; let go: kept
+          const preview = (): void => { pct.textContent = `${strength.value}%`; applyFills({ ...fills, [part]: now() }); };
+          for (const el of [color, strength]) {
+            el.addEventListener("input", preview);
+            el.addEventListener("change", () => save(part, now()));
+          }
+          const reset = h("button.btn.small", { type: "button", title: `Back to the theme's own fill of the ${label}`, disabled: !cur, onclick: () => { save(part, undefined); box.paint?.(); } }, "Default");
+          return h("div.set-fill-row", null, h("b", null, label), color, strength, pct, reset);
+        });
+        const sample = h("div.set-fill-sample", { "aria-hidden": "true", title: "How the Board will look" },
+          h("div.epic-box", null,
+            epicType ? h("div.epic-head", null, h("span.e-name", null, h("span.ebadge", null, epicType), "Self-service onboarding")) : null,
+            h("div.feat", null, h("div.f-top", null, h("span.f-name", null, featType ? `${featType}: Welcome emails` : "Welcome emails")))),
+          h("div.card", null, h("div.c-main", null, h("span.c-title", null, `${storyType}: Review consent banner`), h("span.c-id", null, "#43 · 3d"))));
+        return card("Colours", `The fill of the ${[epicType && `${epicType} box`, featType && `${featType} card`, `${storyType} card`].filter(Boolean).join(", ")} on the Board. A low strength tints the theme's own fill, so it works in light and dark; from 50% the text turns dark or light to stay readable. Default puts the theme's fill back.`,
+          h("div.set-fill", null, h("div.set-fill-rows", null, ...rows), sample));
+      });
+      return box;
     }
 
     /** Which Board columns show, and which pull requests count on cards: yours, applied at once. */

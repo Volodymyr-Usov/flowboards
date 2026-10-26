@@ -38,7 +38,7 @@ Azure DevOps's own boards, burndown, velocity and Delivery Plans stay where they
 - **Priority:** five urgency bars on every story (importance, waiting time, sprint end, deadline, what waits for it), weighed the way your team chooses.
 - **Govern:** checklists as a definition of done, the team's standard tasks in one click, and a Team tab that says who really counts as a member.
 - **Check:** tag tidying (merge, rename, delete, colour) and a Recycle tab that restores many items at once.
-- **Your way:** show or hide every tab, control, Board column and card detail; a Scrum, Kanban or Scrumban layout; the same search and filters on every page; Excel or Copy of any page; one button brings the default layout back.
+- **Your way:** show or hide every tab, control, Board column and card detail; your own colours for Epic boxes, Feature cards and story cards; a Scrum, Kanban or Scrumban layout; the same search and filters on every page; Excel or Copy of any page; one button brings the default layout back.
 
 Every page in detail: [the README on GitHub](https://github.com/Volodymyr-Usov/flowboards#views). Or simply [open the demo](https://flowboards.dev/demo/) and click around.
 

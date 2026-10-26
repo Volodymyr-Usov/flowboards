@@ -36,6 +36,7 @@ import { burndownPanel } from "./burndownpanel.ts";
 import { boardScope, columnHidden, columnShownPatch, readBoardOpts, writeBoardOpts } from "./boardprefs.ts";
 import { blk } from "../ui/blocks.ts";
 import type { Opts } from "./boardprefs.ts";
+import { applyFills } from "./cardfill.ts";
 import { DEFAULT_RULES, alreadyBetween, ruleGaps, boardColumns, readAfterUndo, capCards, cardOrder, nearestBox, CELL_CAP, FEATURE_CAP, clockClass, COLUMN_CAP, columnEnteredAt, columnOf, countOf, daysInColumn, featureGroups, groupBy, limitShowing, matches, missing, movesToRow, placeAmong, prCount, prLinks, priorityMove, rowOf, runLimited, sharesState, sprintRows, tint } from "./boardmodel.ts";
 
 interface PrInfo { status: string; title: string; repo: string; url: string }
@@ -275,6 +276,7 @@ export const boardView: View = {
     let perFeature = new Map<number, number>();
 
     function draw(): void {
+      applyFills(o.fills); // your own fill colours (Settings > Cards)
       // a redraw during a drag would replace the dragged card: draw once when the drag ends
       // also an HTML drag (a task on the taskboard, a task from the details panel): its drop would land on a replaced grid
       if (drag || htmlDrag || editing || draftBusy()) { drawAfterDrag = true; return; }

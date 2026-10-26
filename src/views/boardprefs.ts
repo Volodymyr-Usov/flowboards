@@ -3,6 +3,8 @@
 import { prefs } from "../core/settings.ts";
 import type { ColorMode, ColorRules, MissingMode, PrShow } from "./boardmodel.ts";
 import { DEFAULT_RULES } from "./boardmodel.ts";
+import type { Fills } from "./cardfill.ts";
+import { cleanFills } from "./cardfill.ts";
 
 export const BOARD_KEY = "board";
 
@@ -22,11 +24,13 @@ export interface Opts {
   prs: PrShow;
   /** board columns, or the story map (Features across, sprints down) */
   layout: "columns" | "map";
+  /** your own fill colours of the Epic box, the Feature card and the story card (Settings > Cards) */
+  fills: Fills;
 }
 
 export const DEFAULTS: Opts = {
   epics: true, features: true, empty: false, counts: true, tags: true, ids: false, parents: false, newMark: true, tagColors: true, urgency: true, incoming: false, closed: false,
-  color: "missing", miss: "rules", rules: DEFAULT_RULES, hiddenCols: [], hiddenPeople: [], onlyPeople: [], prs: "all", layout: "columns",
+  color: "missing", miss: "rules", rules: DEFAULT_RULES, hiddenCols: [], hiddenPeople: [], onlyPeople: [], prs: "all", layout: "columns", fills: {},
 };
 
 /** Is this column hidden? New and Closed have their own switches; the others are listed by name. */
@@ -73,6 +77,7 @@ export function readBoardOpts(scope?: string): Opts {
   o.rules = { ...DEFAULT_RULES, ...o.rules };
   if (!["all", "open", "completed"].includes(o.prs)) o.prs = "all";
   if (o.layout !== "map") o.layout = "columns";
+  o.fills = cleanFills(o.fills);
   return o;
 }
 
