@@ -2,7 +2,9 @@
 // Copy and settings on the right) and the area where the chosen view draws. Lines 2 and 3 belong to
 // each view (src/ui/pagebar.ts). One Workspace per page load; picking another team reloads the page on that team.
 import type { Api } from "../api/api.ts";
+import type { Team } from "../api/types.ts";
 import type { HostContext } from "../host/sdk.ts";
+import { rememberIds } from "../core/teamstore.ts";
 import { Ai } from "../core/ai.ts";
 import { ChangeLog } from "../core/changelog.ts";
 import { prefs, resetLayout, Settings } from "../core/settings.ts";
@@ -60,14 +62,24 @@ export function applyTheme(t: Theme, hostDark?: boolean): void {
   document.documentElement.dataset.theme = dark ? "dark" : "light";
 }
 
-export async function startApp(api: Api, host: HostContext | null, project: string, team: string, opts: { readOnly?: boolean } = {}): Promise<App> {
+export async function startApp(api: Api, host: HostContext | null, project: string, team: string, opts: { readOnly?: boolean; teams?: Team[] | null } = {}): Promise<App> {
   setImageHost(api.ctx.orgUrl);
   const settings = new Settings(api);
   const log = new ChangeLog();
   const root = document.getElementById("app")!;
   root.replaceChildren(h("div.boot", null, spinner(`Loading ${team}…`)));
 
-  await Promise.all([settings.loadUser().catch(() => {}), settings.loadShared(project).catch(() => {})]);
+  // storage (settings, rules, retrospectives, schedules…) is kept by the project's and the team's ids: known first
+  const idsKey = `ids:${api.ctx.orgName}/${project}/${team}`;
+  const loadShared = async (): Promise<void> => {
+    const ids = await storageIds(api, host, project, team, opts.teams, {
+      get: () => prefs.get<{ projectId?: string; teamId?: string } | undefined>(idsKey, undefined),
+      set: (v) => { const was = prefs.get<{ projectId?: string; teamId?: string } | undefined>(idsKey, undefined); if (was?.projectId !== v.projectId || was?.teamId !== v.teamId) prefs.set(idsKey, v); },
+    });
+    if (ids.projectId) rememberIds(project, ids.projectId, team, ids.teamId);
+    await settings.loadShared(project);
+  };
+  await Promise.all([settings.loadUser().catch(() => {}), loadShared().catch(() => {})]);
   const ws = new Workspace(api, project, team, { closedDays: settings.shared.closedDays });
   ws.setTeamTweaks(settings.shared.teamPeople?.[team]);
   const writer = new Writer(ws, log, () => settings.shared.rules, api.ctx.me);
@@ -245,6 +257,9 @@ export async function startApp(api: Api, host: HostContext | null, project: stri
   const canExport = (): boolean => {
     const c = current;
     if (!c?.handle) return false;
+    // the page's own quick answer when it has one (building its sheets can be heavy: the Board's every card)
+    const quick = c.handle.hasExport?.();
+    if (quick !== undefined) return quick;
     return c.handle.exportSheets ? sheetsNow().length > 0 : shownTables(c.el).length > 0;
   };
   const xlBtn = h("button.icon-btn.top-btn", {
@@ -262,11 +277,12 @@ export async function startApp(api: Api, host: HostContext | null, project: stri
     xlBtn.title = ok ? "Download as an Excel file: what this page shows, filters and sorting included" : NOTHING;
     copyBtn.title = ok ? "Copy as a table to paste into Excel: what this page shows" : NOTHING;
   };
-  let paintQueued = false;
+  // the page changes often (a drag, a poll): the buttons are checked at most once a second, after the changes
+  let paintTimer: ReturnType<typeof setTimeout> | undefined;
+  let lastPaint = 0;
   const exportWatch = new MutationObserver(() => {
-    if (paintQueued) return;
-    paintQueued = true;
-    requestAnimationFrame(() => { paintQueued = false; paintExport(); });
+    if (paintTimer) return;
+    paintTimer = setTimeout(() => { paintTimer = undefined; lastPaint = Date.now(); paintExport(); }, Math.max(100, 1000 - (Date.now() - lastPaint)));
   });
   exportWatch.observe(main, { childList: true, subtree: true, attributes: true, attributeFilter: ["hidden", "open"] });
   // every table a page draws gets column widths you can drag (kept per page and table)
@@ -448,26 +464,95 @@ export async function startApp(api: Api, host: HostContext | null, project: stri
     if (!ws.loadedAt && ws.status !== "live" && current && !current.handle && current.el.dataset.wait !== ws.status) { current = null; void route(); }
   });
 
-  settings.onChange(() => current?.handle?.update?.(new Set(), "settings"));
+  settings.onChange(() => {
+    // a teammate may have changed who counts as a member (read again every 2 minutes)
+    ws.setTeamTweaks(settings.shared.teamPeople?.[team]);
+    current?.handle?.update?.(new Set(), "settings");
+  });
+
+  // the team's items hit the most one query of Azure DevOps sends: the page shows only part of them; said once
+  let cutShown = false;
+  api.onQueryCut = () => {
+    if (ws.loadedAt || cutShown) return;
+    cutShown = true;
+    toast("Showing the first 20,000 items; choose a smaller team.", { kind: "error", action: { label: "Choose a team", run: () => pickTeam(teamBtn) } });
+  };
 
   void style.load();
   void route();
   // the Scheduler: while this page is open it makes the team's stories that are due (see app/scheduler.ts)
   startScheduler(app);
-  // polling runs from the start: it waits until a first load worked (also one from "Try again")
-  ws.startPolling(30);
-  // until then the page says it could not read: read everything again every 30 seconds
-  const firstLoad = setInterval(() => {
-    if (ws.loadedAt) { clearInterval(firstLoad); return; }
-    if (ws.status === "error" && document.visibilityState === "visible") void ws.load().catch(() => {});
-  }, 30_000);
+  // polling every 30 seconds while the page is visible, from the start: it waits until a first load worked
+  // (also one from "Try again"); until then a failed load is tried again. Errors in a row wait longer each
+  // time (30 s, 1 min, 2 min, … at most 5 min), so a lasting problem is not asked about twice a minute.
+  let fails = 0;
+  const tick = async (): Promise<void> => {
+    if (document.visibilityState === "visible") {
+      if (ws.loadedAt) await ws.poll();
+      else if (ws.status === "error") await ws.load().catch(() => {});
+    }
+    fails = ws.status === "error" ? fails + 1 : 0;
+    setTimeout(() => void tick(), retryDelay(fails));
+  };
+  setTimeout(() => void tick(), retryDelay(0));
+  // the team's settings may change while the page is open (a teammate's new rule): read them again every 2 minutes
+  settings.watchShared();
   try {
     await ws.load();
   } catch (e) {
+    // the saved team is gone (renamed or deleted): forget it and let the person choose again
+    if ((e as { status?: number }).status === 404 && host && !ws.loadedAt) {
+      const key = `team:${api.ctx.orgName}`;
+      prefs.set(key, forgetTeam(prefs.get<SavedTeams>(key, {}), project));
+      try { sessionStorage.setItem(TEAM_GONE, team); } catch { /* the note is not shown */ }
+      location.reload();
+      return app;
+    }
     toast(`Could not read the team's work: ${errorText(e)}`, { kind: "error" });
   }
   return app;
 }
+
+/** sessionStorage key: the name of a saved team that was not found, for the note on the team chooser */
+export const TEAM_GONE = "fb.teamGone";
+
+/** How long to wait before the next poll or try: 30 s normally; after errors in a row 30 s, 1 min, 2 min, 4 min, then 5 min. */
+export function retryDelay(failsInARow: number): number {
+  if (failsInARow <= 1) return 30_000;
+  return Math.min(5 * 60_000, 30_000 * 2 ** (failsInARow - 1));
+}
+
+/** The saved choices without this project's team (it was not found). */
+export function forgetTeam(saved: SavedTeams, project: string): SavedTeams {
+  const out: SavedTeams = { ...saved, byProject: { ...saved.byProject } };
+  delete out.byProject![project];
+  if (out.project === project) delete out.team;
+  if (out.next?.project === project) delete out.next;
+  return out;
+}
+
+/**
+ * The ids of the project and the team, so storage is kept by id (a rename keeps it): from the host when it
+ * shows this project and team, else from the team list; the last ones found are kept in this browser for
+ * when they cannot be read. Empty when they are not known at all (storage then goes by the names).
+ */
+export async function storageIds(api: Pick<Api, "teams" | "projects">, host: Pick<HostContext, "project" | "team"> | null, project: string, team: string,
+  teams?: Team[] | null, cache: { get(): { projectId?: string; teamId?: string } | undefined; set(v: { projectId: string; teamId: string }): void } = noCache): Promise<{ projectId?: string; teamId?: string }> {
+  const hostProject = host?.project?.name === project ? host.project.id : undefined;
+  let projectId = hostProject;
+  let teamId = hostProject && host?.team?.name === team ? host.team.id : undefined;
+  if (!teamId) {
+    const list = teams ?? (await api.teams(project).catch(() => null));
+    const t = list?.find((x) => x.name === team);
+    teamId = t?.id;
+    projectId ??= t?.projectId;
+  }
+  if (teamId && !projectId) projectId = (await api.projects().catch(() => [])).find((p) => p.name === project)?.id;
+  if (projectId && teamId) { cache.set({ projectId, teamId }); return { projectId, teamId }; }
+  const kept = cache.get();
+  return kept?.projectId && kept.teamId ? kept : {};
+}
+const noCache = { get: () => undefined, set: () => {} };
 
 export function hostIsDark(host: HostContext | null): boolean | undefined {
   const bg = host?.theme?.["background-color"] ?? host?.theme?.["palette-neutral-0"];

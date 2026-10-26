@@ -1,21 +1,50 @@
 // Retrospective: one board per sprint. People add notes (anonymous if the board says so, hidden from
 // others until the board moves on), vote, and agree on action items that can become real tasks.
 // The next retrospective opens with the last one's action items and whether they were done.
-// Everything is kept in the extension's shared storage for the project and team, and read again
-// every few seconds while the page is open, so the team sees each other's notes.
+// Everything is kept in the extension's shared storage for the project and team: the boards in the
+// team's collection, each board's notes, action items and votes in a collection of its own. The open
+// board is read again every few seconds while the page is open, so the team sees each other's notes;
+// the list of boards once a minute. Votes are kept without names (see RetroBallot).
+import type { Api } from "../api/api.ts";
 import type { Iteration, WorkItem } from "../api/types.ts";
 import type { View } from "../app/context.ts";
 import { fmtDate, isDone } from "../core/model.ts";
 import { prefs } from "../core/settings.ts";
-import { collectionName, every, newDocId, TeamStore } from "../core/teamstore.ts";
+import { collectionName, every, newDocId, storageName, subCollectionName, TeamStore } from "../core/teamstore.ts";
 import { h, icon } from "../ui/dom.ts";
 import { avatar, empty, errorText, help, personPicker, spinner, stateMark, toast } from "../ui/kit.ts";
 import { pageBar } from "../ui/pagebar.ts";
 import { escapeHtml } from "./sprintlogic.ts";
-import type { Phase, RetroAction, RetroBoard, RetroDoc, RetroNote } from "./retrologic.ts";
-import { nextPhase, ordered, PHASES, previousBoard, ranked, TEMPLATES, totalVotes, visibleNotes, vote, votesUsed } from "./retrologic.ts";
+import type { Phase, RetroAction, RetroBallot, RetroBoard, RetroDoc, RetroNote } from "./retrologic.ts";
+import { ballotId, ballotVote, mergeRetroDocs, myVotesOn, myVotesUsed, newSalt, nextPhase, noteTotals, ordered, PHASES, previousBoard, ranked, strays, TEMPLATES, visibleNotes, vote, voterCount } from "./retrologic.ts";
 
 const POLL_MS = 5000;
+/** the list of boards (and older boards' notes) is read this often; the open board every POLL_MS */
+const BOARDS_MS = 60_000;
+/** the person's own salt for their vote ids, in their personal storage */
+const SALT_DOC = "retro-salt";
+/** said where notes are "hidden": they are hidden on screen only */
+export const RETRO_PRIVACY = "Notes and votes are kept in the organization's extension storage: hidden on screen until the board moves on, but people in the organization can read them by technical means.";
+
+const isConflict = (e: unknown): boolean => [409, 412].includes((e as { status?: number }).status ?? 0);
+
+/** The person's salt for ballot ids (made once, kept in their own storage); `create` false: only read. */
+export async function mySalt(api: Pick<Api, "getDoc" | "createDoc">, create: boolean): Promise<string> {
+  const doc = await api.getDoc("user", SALT_DOC, "user");
+  if (typeof doc?.salt === "string" && doc.salt) return doc.salt;
+  if (!create) throw new Error("No votes of yours yet.");
+  const salt = newSalt();
+  try {
+    await api.createDoc("user", { id: SALT_DOC, salt }, "user");
+    return salt;
+  } catch (e) {
+    // another tab of this person made it first: theirs counts
+    if (!isConflict(e)) throw e;
+    const again = await api.getDoc("user", SALT_DOC, "user");
+    if (typeof again?.salt === "string" && again.salt) return again.salt;
+    throw e;
+  }
+}
 
 export const retroView: View = {
   id: "retro",
@@ -28,19 +57,39 @@ export const retroView: View = {
     const me = ws.api.ctx.me;
     const meKey = me.uniqueName.toLowerCase();
     const store = new TeamStore<RetroDoc>(ws.api, collectionName("retro", ws.project, ws.team));
+    /** a board's own collection: its notes, action items and ballots */
+    const ownStores = new Map<string, TeamStore<RetroDoc>>();
+    const own = (iteration: string): TeamStore<RetroDoc> => {
+      let s = ownStores.get(iteration);
+      if (!s) { s = new TeamStore<RetroDoc>(ws.api, subCollectionName(store.collection, iteration)); ownStores.set(iteration, s); }
+      return s;
+    };
+    /** where a board's notes and action items are: its own collection, or (an older board not split yet) the team's */
+    const home = (iteration: string): TeamStore<RetroDoc> => (boards().some((b) => b.iteration === iteration && b.notesApart) ? own(iteration) : store);
     // An answer that overlaps a change of ours, or comes after a newer read, may be older than the screen
     // (an optimistic note or vote would flicker away): it is dropped, and the next read has the truth.
     let loadSeq = 0;
     let writing = 0;
     let writeMark = 0;
     const tracked = <R>(job: () => Promise<R>): Promise<R> => { writing++; writeMark++; return job().finally(() => { writing--; writeMark++; }); };
+    type Part = RetroNote | RetroAction;
     const writes = {
-      put: (d: RetroDoc) => tracked(() => store.put(d)),
-      update: (id: string, change: (d: RetroDoc) => RetroDoc | null) => tracked(() => store.update(id, change)),
-      remove: (id: string) => tracked(() => store.remove(id)),
+      putBoard: (d: RetroBoard) => tracked(() => store.put(d)),
+      updateBoard: (id: string, change: (d: RetroDoc) => RetroDoc | null) => tracked(() => store.update(id, change)),
+      put: (d: Part) => tracked(() => home(d.board).put(d)),
+      update: (d: { id: string; board: string }, change: (d: RetroDoc) => RetroDoc | null) => tracked(() => home(d.board).update(d.id, change)),
+      remove: (d: { id: string; board: string }) => tracked(async () => {
+        await home(d.board).remove(d.id);
+        // a split board's note may still have its old copy in the team's collection: it goes too, or it would come back
+        if (home(d.board) !== store && mainDocs.some((x) => x.id === d.id)) await store.remove(d.id);
+      }),
+      ballot: (iteration: string, id: string, change: (d: RetroDoc | null) => RetroDoc | null) => tracked(() => own(iteration).upsert(id, change)),
     };
+    const partOf = (id: string): Part | undefined => docs.find((d): d is Part => d.id === id && (d.kind === "note" || d.kind === "action"));
     const myNotesKey = `retroMine:${store.collection}`;
-    const mineIds = new Set(prefs.get<string[]>(myNotesKey, []));
+    // the list under the collection's older name (before storage went by the team's id) still counts
+    const oldNotesKey = `retroMine:${storageName(["retro", ws.project, ws.team])}`;
+    const mineIds = new Set([...prefs.get<string[]>(myNotesKey, []), ...(oldNotesKey !== myNotesKey ? prefs.get<string[]>(oldNotesKey, []) : [])]);
     const remember = (id: string): void => { mineIds.add(id); prefs.set(myNotesKey, [...mineIds].slice(-500)); };
     // notes and action items typed but not added yet: per sprint and column, kept in this browser tab
     const draftKey = (sprint: string, col: string): string => `fb.retroDraft:${store.collection}:${sprint}:${col}`;
@@ -68,11 +117,35 @@ export const retroView: View = {
     let iter: Iteration = sprints.find((s) => s.id === params.it)
       ?? (cur && cur.finish && Date.parse(cur.finish) - now < 3 * 86_400_000 ? cur : ended[ended.length - 1] ?? cur ?? sprints[0]);
 
+    /** what the page shows: mergeRetroDocs of the two below (changed at once by our own changes) */
     let docs: RetroDoc[] = [];
+    /** the team's collection: the boards (and older boards' notes and actions) */
+    let mainDocs: RetroDoc[] = [];
+    let mainAt = 0;
+    /** sprint (iteration id) -> its board's own collection as last read */
+    const ownDocs = new Map<string, RetroDoc[]>();
     let loaded = false;
     let loadError = "";
     let lastJson = "";
     const extraItems = new Map<number, WorkItem>(); // linked tasks not in the workspace
+    // votes: my ballot's id per board (a hash with my own salt; see RetroBallot)
+    let saltJob: Promise<string> | undefined;
+    const salt = (): Promise<string> => (saltJob ??= mySalt(ws.api, !app.actions.readOnly).catch((e) => { saltJob = undefined; throw e; }));
+    const ballotIds = new Map<string, string>();
+    async function myBallotId(b: RetroBoard): Promise<string> {
+      const known = ballotIds.get(b.id);
+      if (known) return known;
+      const id = await ballotId(b.id, me.uniqueName, await salt());
+      ballotIds.set(b.id, id);
+      return id;
+    }
+    const ballotsOf = (b: RetroBoard | undefined): RetroBallot[] => (b ? docs.filter((d): d is RetroBallot => d.kind === "ballot" && d.board === b.iteration) : []);
+    const myBallot = (b: RetroBoard | undefined): RetroBallot | undefined => {
+      const id = b ? ballotIds.get(b.id) : undefined;
+      return id ? ballotsOf(b).find((x) => x.id === id) : undefined;
+    };
+    /** boards whose notes are being moved to their own collection (or could not be, this visit) */
+    const moving = new Set<string>();
 
     // line 2: the field (nothing to search: it asks AI) and the sprint; the sprint's dates at its end
     const bar = pageBar(app);
@@ -89,18 +162,80 @@ export const retroView: View = {
     const actionsOf = (b: RetroBoard | undefined): RetroAction[] => (b ? docs.filter((d): d is RetroAction => d.kind === "action" && d.board === b.iteration).sort((a, c) => a.created.localeCompare(c.created)) : []);
     const isMine = (n: RetroNote): boolean => mineIds.has(n.id) || (!!n.author && n.author.toLowerCase() === meKey);
 
-    async function load(force = false): Promise<void> {
+    const boardIn = (list: RetroDoc[], iteration: string): RetroBoard | undefined => list.find((d): d is RetroBoard => d.kind === "board" && d.iteration === iteration);
+
+    /**
+     * Read what the page shows. Every time: the open sprint's board (its id is fixed, so a new board or a
+     * phase change shows at once) and its own collection. The list of boards once a minute (or `withBoards`),
+     * and every time while the open board is an older one whose notes are still in the team's collection.
+     */
+    async function load(force = false, withBoards = false): Promise<void> {
       const mark = writeMark;
       const seq = ++loadSeq;
-      let next: RetroDoc[] | null = null;
       let error = "";
-      try { next = await store.all(); } catch (e) { error = errorText(e); }
+      let main = mainDocs;
+      const got = new Map<string, RetroDoc[]>();
+      const sprint = iter;
+      const boardId = `board-${sprint.id}`;
+      const shown = boardIn(main, sprint.id);
+      const listDue = withBoards || !mainAt || Date.now() - mainAt >= BOARDS_MS || (!!shown && !shown.notesApart);
+      try {
+        if (listDue) main = await store.all();
+        else {
+          const bd = await store.get(boardId);
+          main = [...main.filter((d) => d.id !== boardId), ...(bd ? [bd] : [])];
+        }
+        const b = boardIn(main, sprint.id);
+        if (b) got.set(b.iteration, await own(b.iteration).all());
+        // the board before: its action items show at the top
+        const prev = previousBoard(main.filter((d): d is RetroBoard => d.kind === "board"), b, (id) => sprints.find((s) => s.id === id)?.start, sprint.start);
+        if (prev?.notesApart && (listDue || !ownDocs.has(prev.iteration))) got.set(prev.iteration, await own(prev.iteration).all());
+      } catch (e) { error = errorText(e); }
       if (seq !== loadSeq || writing || mark !== writeMark) return;
-      if (next) { docs = next; loaded = true; }
+      if (!error) {
+        mainDocs = main;
+        if (listDue) mainAt = Date.now();
+        for (const [k, v] of got) ownDocs.set(k, v);
+        docs = mergeRetroDocs(mainDocs, ownDocs);
+        loaded = true;
+      }
       loadError = error;
       const json = JSON.stringify(docs) + loadError;
       if (force || json !== lastJson) { lastJson = json; draw(); }
       void fetchLinked();
+      const b = board();
+      if (b && !ballotIds.has(b.id)) void myBallotId(b).then(() => draw(), () => {});
+      if (b && !app.actions.readOnly && !error) {
+        // an older board opened where changes can be made: its notes move to its own collection, once a visit;
+        // a note another page wrote to the old place just before (seen with the list of boards) is moved too
+        if (!b.notesApart) { if (!moving.has("split:" + b.id)) void moveNotes(b, true); }
+        else if (listDue && !moving.has("heal:" + b.id) && strays(mainDocs, ownDocs.get(b.iteration) ?? [], b.iteration).length) void moveNotes(b, false);
+      }
+    }
+
+    /** Copy a board's notes and action items from the team's collection to its own (never over one there), then mark the board. */
+    async function moveNotes(b: RetroBoard, mark: boolean): Promise<void> {
+      const key = (mark ? "split:" : "heal:") + b.id;
+      moving.add(key);
+      let ok = false;
+      try {
+        await tracked(async () => {
+          const target = own(b.iteration);
+          const [main, here] = await Promise.all([store.all(), target.all()]);
+          await Promise.all(strays(main, here, b.iteration).map(async (d) => {
+            const { __etag: _etag, ...body } = d as Part & { __etag?: number };
+            try { await target.create(body as RetroDoc); } catch (e) { if (!isConflict(e)) throw e; }
+          }));
+          if (mark) await store.update(b.id, (d) => ({ ...d, notesApart: true } as RetroDoc));
+        });
+        ok = true;
+      } catch (e) {
+        // tried again on the next visit; until then the board keeps working where its notes are
+        console.warn("Retrospective notes not moved to the board's own place", e);
+      }
+      // a split is tried once a visit; copying a few strays again later is fine
+      if (ok && !mark) moving.delete(key);
+      await load(true, true);
     }
 
     async function fetchLinked(): Promise<void> {
@@ -151,11 +286,13 @@ export const retroView: View = {
       iter = s;
       try { history.replaceState(null, "", `#retro?it=${encodeURIComponent(s.id)}`); } catch { /* not allowed in this frame */ }
       draw();
+      void load(true);
     }
 
     function body(): HTMLElement {
       if (!loaded) return spinner("Reading the retrospective…");
       const b = board();
+      if (b?.notesApart && !ownDocs.has(b.iteration)) return spinner("Reading the retrospective…");
       // no board yet: the latest board before this sprint's start (not a later sprint's)
       const prev = previousBoard(boards(), b, (id) => sprints.find((s) => s.id === id)?.start, iter.start);
       return h("div", null, previousActions(prev), b ? boardView(b) : startCard());
@@ -189,9 +326,9 @@ export const retroView: View = {
           const doc: RetroBoard = {
             id: `board-${iter.id}`, kind: "board", iteration: iter.id, iterationName: iter.name, start: iter.start,
             columns: t.columns, phase: "write", votesPerPerson: Math.max(1, Math.min(20, Math.floor(Number(votes.value)) || 5)),
-            anonymous: anon.checked, created: new Date().toISOString(), createdBy: me.displayName,
+            anonymous: anon.checked, created: new Date().toISOString(), createdBy: me.displayName, notesApart: true,
           };
-          try { await writes.put(doc); await load(true); } catch (e) { toast(errorText(e), { kind: "error" }); startBtn.disabled = false; }
+          try { await writes.putBoard(doc); await load(true); } catch (e) { toast(errorText(e), { kind: "error" }); startBtn.disabled = false; }
         },
       }, "Start the retrospective");
       if (app.actions.readOnly) { startBtn.disabled = true; startBtn.title = "Read-only: this page cannot change anything"; }
@@ -202,20 +339,27 @@ export const retroView: View = {
           h("label", null, h("span", null, "Columns"), tpl),
           h("label.inline", null, anon, h("span", null, "Anonymous notes"), help("Notes do not record who wrote them. Each person still sees their own notes as theirs on their own computer.")),
           h("label.inline", null, h("span", null, "Votes per person"), votes)),
-        startBtn);
+        startBtn,
+        h("p.small.muted.retro-privacy", null, RETRO_PRIVACY));
     }
+
+    /** votes per note on this board: on the notes (older) and in everyone's ballots */
+    let totals = new Map<string, number>();
+    const votesFor = (n: RetroNote): number => totals.get(n.id) ?? 0;
 
     function boardView(b: RetroBoard): HTMLElement {
       const notes = notesOf(b);
-      const used = votesUsed(notes, me.uniqueName);
+      const ballots = ballotsOf(b);
+      totals = noteTotals(notes, ballots);
+      const used = myVotesUsed(notes, myBallot(b), me.uniqueName);
       const left = Math.max(0, b.votesPerPerson - used);
       const phaseIdx = PHASES.findIndex((p) => p.id === b.phase);
       const steps = h("div.retro-steps", { role: "list" }, PHASES.map((p, i) => h(`span.retro-step${i === phaseIdx ? ".now" : i < phaseIdx ? ".past" : ""}`, { role: "listitem", title: p.help }, `${i + 1}. ${p.label}`)));
-      const people = new Set(notes.flatMap((n) => Object.keys(n.votes ?? {})));
+      const voted = voterCount(notes, ballots);
       const bar = h("div.retro-bar", null, steps,
         h("span.spacer"),
         b.phase === "vote" ? h("span.retro-votes", { title: "Votes you can still spend on this board" }, `${left} of ${b.votesPerPerson} votes left`) : null,
-        h("span.muted.small", null, `${notes.length} note${notes.length === 1 ? "" : "s"}${people.size ? ` · ${people.size} voted` : ""}${b.anonymous ? " · anonymous" : ""}`),
+        h("span.muted.small", null, `${notes.length} note${notes.length === 1 ? "" : "s"}${voted ? ` · ${voted} voted` : ""}${b.anonymous ? " · anonymous" : ""}`),
         b.phase !== "closed" && !app.actions.readOnly ? h("button.btn.primary.small", {
           title: `Move the whole board to "${PHASES[phaseIdx + 1]?.label}": ${PHASES[phaseIdx + 1]?.help}`,
           onclick: () => void setPhase(b, nextPhase(b.phase)),
@@ -223,7 +367,8 @@ export const retroView: View = {
         phaseIdx > 0 && !app.actions.readOnly ? h("button.btn.small", { title: `Go back to "${PHASES[phaseIdx - 1].label}"`, onclick: () => void setPhase(b, PHASES[phaseIdx - 1].id) }, "Back") : null);
       const cols = h("div.retro-cols", { style: { "--n": String(b.columns.length) } }, b.columns.map((c) => column(b, c, notes.filter((n) => n.column === c.id), left)));
       const discuss = b.phase === "act" || b.phase === "closed";
-      return h("div", null, bar, h("p.small.muted.retro-phase-help", null, PHASES[phaseIdx].help), unsentNotes(b),
+      return h("div", null, bar, h("p.small.muted.retro-phase-help", null, PHASES[phaseIdx].help),
+        b.phase === "write" || b.phase === "vote" ? h("p.small.muted.retro-privacy", null, RETRO_PRIVACY) : null, unsentNotes(b),
         discuss ? [rankedList(b, notes), h("details.retro-bycol", { open: colsOpen, ontoggle: (e: Event) => { colsOpen = (e.currentTarget as HTMLDetailsElement).open; } },
           h("summary", null, "Notes by column"), cols)] : cols,
         discuss ? actionsPanel(b) : "");
@@ -243,7 +388,7 @@ export const retroView: View = {
 
     /** Discuss: every note of the board in one list, the most votes first. */
     function rankedList(b: RetroBoard, notes: RetroNote[]): HTMLElement {
-      const list = ranked(notes);
+      const list = ranked(notes, votesFor);
       return h("section.card-box.retro-ranked", null,
         h("h3", null, "To discuss, most votes first", h("span.muted", null, ` ${list.length}`),
           help("All notes of the board in one list, across the columns. Talk about them from the top; \"Action\" makes an action item from a note.")),
@@ -271,14 +416,14 @@ export const retroView: View = {
         h("h3.retro-col-head", null, c.title, h("span.muted", { title: b.phase === "write" && hidden ? `${shown.length} yours, ${hidden} hidden` : "" }, ` ${shown.length}${b.phase === "write" && hidden ? ` + ${hidden}` : ""}`)),
         canWrite ? h("div.retro-add", null, box, h("button.btn.small", { title: "Add the note", onclick: () => void add() }, icon("plus", 12), "Add")) : null,
         h("div.retro-notes", null,
-          ordered(shown, b.phase).map((n) => noteCard(b, n, left)),
+          ordered(shown, b.phase, votesFor).map((n) => noteCard(b, n, left)),
           hidden ? h("div.retro-hidden", { title: "Other people's notes show when the board moves on to voting" }, `${hidden} note${hidden === 1 ? "" : "s"} from others, hidden while writing`) : null));
     }
 
     function noteCard(b: RetroBoard, n: RetroNote, left: number, columnTitle?: string): HTMLElement {
       const mine = isMine(n);
-      const myVotes = Object.entries(n.votes ?? {}).find(([k]) => k.toLowerCase() === meKey)?.[1] ?? 0;
-      const total = totalVotes(n);
+      const myVotes = myVotesOn(n, myBallot(b), me.uniqueName);
+      const total = votesFor(n);
       const ro = app.actions.readOnly;
       // your own note can be changed or deleted while notes are written and voted on
       const own = mine && (b.phase === "write" || b.phase === "vote") && !ro;
@@ -289,8 +434,8 @@ export const retroView: View = {
           n.authorName ? h("span.small.muted", null, n.authorName) : mine ? h("span.small.muted", null, "You") : h("span.small.muted", null, "Anonymous"),
           h("span.spacer"),
           b.phase !== "write" ? h("span.retro-count", { title: `${total} vote${total === 1 ? "" : "s"}${myVotes ? `, ${myVotes} from you` : ""}` }, `▲ ${total}`) : null,
-          b.phase === "vote" && !ro ? h("button.icon-btn.small", { title: myVotes ? "Take back one of your votes" : "You have not voted for this note", "aria-label": "Take back a vote", disabled: !myVotes, onclick: () => void castVote(n, -1, left) }, "−") : null,
-          b.phase === "vote" && !ro ? h("button.btn.small.retro-vote", { title: left ? "Give this note one of your votes" : "You have used all your votes", disabled: !left, onclick: () => void castVote(n, 1, left) }, "+1") : null,
+          b.phase === "vote" && !ro ? h("button.icon-btn.small", { title: myVotes ? "Take back one of your votes" : "You have not voted for this note", "aria-label": "Take back a vote", disabled: !myVotes, onclick: () => void castVote(n, -1) }, "−") : null,
+          b.phase === "vote" && !ro ? h("button.btn.small.retro-vote", { title: left ? "Give this note one of your votes" : "You have used all your votes", disabled: !left, onclick: () => void castVote(n, 1) }, "+1") : null,
           b.phase === "act" && !ro ? (actionsOf(b).some((a) => a.noteId === n.id) ? h("span.small.ok", { title: "An action item was made from this note" }, "✓ action")
             : h("button.btn.small", { title: "Make an action item from this note", disabled: pending.has(n.id), onclick: () => { pending.add(n.id); void addAction(b, n.text, n.id).finally(() => pending.delete(n.id)); } }, "Action")) : null,
           own ? h("button.icon-btn.small", { title: total ? `Delete your note (its ${total} vote${total === 1 ? "" : "s"} go too)` : "Delete your note", "aria-label": "Delete note", onclick: () => void removeNote(n) }, icon("close", 12)) : null));
@@ -345,7 +490,9 @@ export const retroView: View = {
 
     async function writeText(id: string, text: string): Promise<boolean> {
       docs = docs.map((d) => (d.id === id ? { ...d, text } as RetroDoc : d));
-      try { await writes.update(id, (d) => ({ ...d, text } as RetroDoc)); return true; } catch (err) { toast(errorText(err), { kind: "error" }); return false; }
+      const part = partOf(id);
+      if (!part) return false;
+      try { await writes.update(part, (d) => ({ ...d, text } as RetroDoc)); return true; } catch (err) { toast(errorText(err), { kind: "error" }); return false; }
     }
 
     async function saveEdit(e: NonNullable<typeof editing>): Promise<void> {
@@ -399,7 +546,7 @@ export const retroView: View = {
           onchange: (e: Event) => {
             const done = (e.target as HTMLInputElement).checked;
             // a refused save puts the box back as the board has it
-            void writes.update(a.id, (d) => ({ ...d, done } as RetroDoc)).catch((err) => toast(errorText(err), { kind: "error" })).then(() => load(true));
+            void writes.update(a, (d) => ({ ...d, done } as RetroDoc)).catch((err) => toast(errorText(err), { kind: "error" })).then(() => load(true));
           },
         }),
         editing?.id === a.id ? editor(a.id, false, "Action item") : editableText("span.retro-action-text", a.id, a.text, editable && !ro, "Click to change the action item"),
@@ -419,7 +566,7 @@ export const retroView: View = {
 
     /** A new owner for the action, and for its task when one was made. */
     async function setOwner(a: RetroAction, p: { uniqueName: string; displayName: string } | null): Promise<void> {
-      try { await writes.update(a.id, (d) => ({ ...d, owner: p?.uniqueName, ownerName: p?.displayName } as RetroDoc)); } catch (e) { toast(errorText(e), { kind: "error" }); return; }
+      try { await writes.update(a, (d) => ({ ...d, owner: p?.uniqueName, ownerName: p?.displayName } as RetroDoc)); } catch (e) { toast(errorText(e), { kind: "error" }); return; }
       await load(true);
       if (!a.workItemId) return;
       if (ws.get(a.workItemId)) await app.actions.assign(a.workItemId, p?.uniqueName ?? null);
@@ -428,23 +575,35 @@ export const retroView: View = {
 
     // ---------- changes ----------
     async function setPhase(b: RetroBoard, phase: Phase): Promise<void> {
-      try { await writes.update(b.id, (d) => ({ ...d, phase } as RetroDoc)); await load(true); } catch (e) { toast(errorText(e), { kind: "error" }); }
+      try { await writes.updateBoard(b.id, (d) => ({ ...d, phase } as RetroDoc)); await load(true); } catch (e) { toast(errorText(e), { kind: "error" }); }
     }
 
-    async function castVote(n: RetroNote, delta: 1 | -1, left: number): Promise<void> {
-      const local = vote(n, me.uniqueName, delta, left);
-      if (!local) return;
-      docs = docs.map((d) => (d.id === n.id ? local : d));
+    /**
+     * Give (+1) or take back (-1) a vote. A vote goes into my ballot on this board (no name: see
+     * RetroBallot); taking one back takes it from my ballot, or else from an older vote on the note itself.
+     */
+    async function castVote(n: RetroNote, delta: 1 | -1): Promise<void> {
+      const b = board();
+      if (!b) return;
+      let id: string;
+      try { id = await myBallotId(b); } catch (e) { toast(`Your votes could not be read: ${errorText(e)}`, { kind: "error" }); return; }
+      const mine = myBallot(b);
+      const inBallot = delta > 0 || (mine?.votes?.[n.id] ?? 0) > 0;
+      const leftWith = (ballot: RetroBallot | undefined): number => b.votesPerPerson - myVotesUsed(notesOf(b), ballot, me.uniqueName);
+      if (inBallot) {
+        const local = ballotVote(mine ?? null, id, b.iteration, n.id, delta, leftWith(mine));
+        if (!local) return;
+        docs = [...docs.filter((d) => d.id !== id), local];
+      } else {
+        const local = vote(n, me.uniqueName, -1, 0);
+        if (!local) return;
+        docs = docs.map((d) => (d.id === n.id ? local : d));
+      }
       draw();
       try {
-        const fresh = await store.all().catch(() => docs);
-        await writes.update(n.id, (d) => {
-          const latest = d as RetroNote;
-          const b = board();
-          const others = fresh.filter((x): x is RetroNote => x.kind === "note" && x.board === b?.iteration && x.id !== n.id);
-          const stillLeft = (b?.votesPerPerson ?? 5) - votesUsed(others, me.uniqueName) - (Object.entries(latest.votes ?? {}).find(([k]) => k.toLowerCase() === meKey)?.[1] ?? 0);
-          return vote(latest, me.uniqueName, delta, stillLeft);
-        });
+        // checked again on the newest copy of my ballot (another tab of mine may have voted)
+        if (inBallot) await writes.ballot(b.iteration, id, (d) => ballotVote(d as RetroBallot | null, id, b.iteration, n.id, delta, leftWith((d as RetroBallot | null) ?? undefined)));
+        else await writes.update(n, (d) => vote(d as RetroNote, me.uniqueName, -1, 0));
       } catch (e) { toast(errorText(e), { kind: "error" }); }
       await load(true);
     }
@@ -468,8 +627,8 @@ export const retroView: View = {
       const cur = docs.find((d) => d.id === n.id) ?? n;
       docs = docs.filter((d) => d.id !== n.id);
       draw();
-      try { await writes.remove(n.id); } catch (e) { toast(errorText(e), { kind: "error" }); await load(true); return; }
-      toast("Note deleted", { kind: "ok", undo: async () => { await writes.put(cur); await load(true); } });
+      try { await writes.remove(n); } catch (e) { toast(errorText(e), { kind: "error" }); await load(true); return; }
+      toast("Note deleted", { kind: "ok", undo: async () => { await writes.put(cur as Part); await load(true); } });
     }
 
     async function addAction(b: RetroBoard, text: string, noteId?: string): Promise<void> {
@@ -483,9 +642,9 @@ export const retroView: View = {
       const cur = docs.find((d) => d.id === a.id) ?? a;
       docs = docs.filter((d) => d.id !== a.id);
       draw();
-      try { await writes.remove(a.id); } catch (e) { toast(errorText(e), { kind: "error" }); await load(true); return; }
+      try { await writes.remove(a); } catch (e) { toast(errorText(e), { kind: "error" }); await load(true); return; }
       toast(a.workItemId ? `Action item removed; task #${a.workItemId} stays in Azure DevOps` : "Action item removed",
-        { kind: "ok", undo: async () => { await writes.put(cur); await load(true); } });
+        { kind: "ok", undo: async () => { await writes.put(cur as Part); await load(true); } });
     }
 
     async function makeTask(a: RetroAction): Promise<void> {
@@ -510,7 +669,7 @@ export const retroView: View = {
         }
         const taskId = id;
         try {
-          await writes.update(a.id, (d) => ({ ...d, workItemId: taskId } as RetroDoc));
+          await writes.update(a, (d) => ({ ...d, workItemId: taskId } as RetroDoc));
           madeTasks.delete(a.id);
         } catch (e) { toast(`Task #${taskId} was created but not linked: ${errorText(e)}. Press "Link task" to try again.`, { kind: "error" }); }
       } finally {
@@ -520,7 +679,7 @@ export const retroView: View = {
     }
 
     draw();
-    void load(true);
+    void load(true, true);
     const stop = every(POLL_MS, () => load());
 
     return {

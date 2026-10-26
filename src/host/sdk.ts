@@ -32,7 +32,7 @@ const HOST_CONTROL = "DevOps.HostControl";
 const SERVICE_MANAGER = "DevOps.ServiceManager";
 const SDK_VERSION = 4.0;
 
-class Channel {
+export class Channel {
   private next = 1;
   private pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: unknown) => void }>();
   private targetOrigin: string | undefined;
@@ -49,14 +49,29 @@ class Channel {
     this.objects.set(instanceId, obj);
   }
 
-  call<T>(methodName: string, instanceId: string, params: unknown[] = [], instanceContext?: unknown, serializationSettings?: unknown): Promise<T> {
+  /**
+   * A call to the host. It gives up after `timeoutMs` (default 60 s): a host that never answers cannot
+   * keep a caller waiting, and the waiting entry is dropped so a late answer is ignored.
+   */
+  call<T>(methodName: string, instanceId: string, params: unknown[] = [], instanceContext?: unknown, serializationSettings?: unknown,
+    timeout: { ms: number; what: string } = { ms: 60_000, what: methodName }): Promise<T> {
     const msg: RpcMessage = { id: this.next++, jsonrpc: "2.0", methodName, instanceId, params, instanceContext, serializationSettings };
     if (!this.targetOrigin) msg.handshakeToken = this.token;
     return new Promise<T>((resolve, reject) => {
-      this.pending.set(msg.id, { resolve: resolve as (v: unknown) => void, reject });
+      const timer = setTimeout(() => {
+        this.pending.delete(msg.id);
+        reject(new Error(`${timeout.what}: no answer from Azure DevOps after ${timeout.ms / 1000} s`));
+      }, timeout.ms);
+      this.pending.set(msg.id, {
+        resolve: (v) => { clearTimeout(timer); (resolve as (v: unknown) => void)(v); },
+        reject: (e) => { clearTimeout(timer); reject(e); },
+      });
       this.target.postMessage(JSON.stringify(msg), "*");
     });
   }
+
+  /** How many calls still wait for an answer (for tests). */
+  waiting(): number { return this.pending.size; }
 
   private receive(e: MessageEvent): void {
     if (hostLog.length < 20) hostLog.push(`${e.source === this.target ? "parent" : "other"} ${e.origin}: ${String(typeof e.data === "string" ? e.data : JSON.stringify(e.data)).replace(/"token":"[^"]+"/g, '"token":"…"').slice(0, 240)}`);
@@ -65,10 +80,11 @@ class Channel {
     try { msg = typeof e.data === "string" ? JSON.parse(e.data) : e.data; } catch { return; }
     // current hosts send no "jsonrpc" field: recognise our messages by their numeric id instead
     if (!msg || typeof msg !== "object" || typeof msg.id !== "number") return;
-    // The first answer proves who the host is: it echoes our handshake token. After that only its origin counts.
+    // The first answer proves who the host is: it echoes our handshake token. After that only that exact
+    // origin counts (an empty or "null" origin, or one that only starts the same way, is not the host).
     if (this.targetOrigin) {
-      if (e.origin && e.origin !== "null" && !this.targetOrigin.toLowerCase().startsWith(e.origin.toLowerCase())) return;
-    } else if (msg.handshakeToken === this.token) {
+      if (e.origin !== this.targetOrigin) return;
+    } else if (msg.handshakeToken === this.token && e.origin && e.origin !== "null") {
       this.targetOrigin = e.origin;
     } else return;
 
@@ -119,6 +135,7 @@ export function inFrame(): boolean {
   try { return window.parent !== window; } catch { return true; }
 }
 
+/** A promise that gives up after `ms` (for a host function, whose waiting entry the channel drops itself after 60 s). */
 function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const t = setTimeout(() => reject(new Error(`${what}: no answer from Azure DevOps after ${ms / 1000} s`)), ms);
@@ -126,19 +143,24 @@ function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
   });
 }
 
+/** Start a channel to this host window (exported for tests; `connect` uses it). */
+export function openChannel(target: Window): Channel {
+  channel = new Channel(target);
+  return channel;
+}
+
 /** Handshake with the host. Rejects when the page is not inside Azure DevOps. */
 export async function connect(timeoutMs = 6000): Promise<HostContext> {
   if (!inFrame()) throw new Error("Not inside Azure DevOps");
-  channel = new Channel(window.parent);
-  channel.register("DevOps.SdkClient", {
+  const ch = openChannel(window.parent);
+  ch.register("DevOps.SdkClient", {
     dispatchEvent: (name: unknown, params: unknown) => {
       const detail = (params as { detail?: Record<string, string> })?.detail;
       if (name === "themeChanged" && detail && themeListener) themeListener(detail);
     },
   });
-  const hs = await withTimeout(
-    channel.call<Record<string, any>>("initialHandshake", HOST_CONTROL, [{ sdkVersion: SDK_VERSION, loaded: false, applyTheme: true }]),
-    timeoutMs, "Handshake");
+  const hs = await ch.call<Record<string, any>>("initialHandshake", HOST_CONTROL, [{ sdkVersion: SDK_VERSION, loaded: false, applyTheme: true }],
+    undefined, undefined, { ms: timeoutMs, what: "Handshake" });
   const ctx = hs.context ?? {};
   // the page context sits inside "context" (older hosts put it at the top)
   const web = ctx.pageContext?.webContext ?? hs.pageContext?.webContext ?? {};
@@ -158,7 +180,7 @@ export async function connect(timeoutMs = 6000): Promise<HostContext> {
   if (!result.project) {
     // older hosts: the project comes from a host service
     try {
-      const svc = await withTimeout(getService<{ getProject: () => Promise<{ id: string; name: string }> }>("ms.vss-tfs-web.tfs-page-data-service"), 4000, "Project service");
+      const svc = await getService<{ getProject: () => Promise<{ id: string; name: string }> }>("ms.vss-tfs-web.tfs-page-data-service", 4000);
       const p = await withTimeout(svc.getProject(), 4000, "Project");
       if (p) result.project = { id: p.id, name: p.name };
     } catch { /* the app lets the person pick a project */ }
@@ -177,25 +199,16 @@ export function notifyFailed(message: string): void {
 /** The signed-in person's token. Gives up after 20 s, so a host that does not answer cannot hold a request slot. */
 export async function getAccessToken(): Promise<string> {
   if (!channel) throw new Error("Not connected to Azure DevOps");
-  const t = await withTimeout(channel.call<string | { token: string }>("getAccessToken", HOST_CONTROL), 20_000, "Sign-in token");
+  const t = await channel.call<string | { token: string }>("getAccessToken", HOST_CONTROL, [], undefined, undefined, { ms: 20_000, what: "Sign-in token" });
   return typeof t === "string" ? t : t.token;
 }
 
-export async function getService<T>(contributionId: string): Promise<T> {
+/** A host service; gives up after `timeoutMs` (10 s), so a host that does not have it cannot keep the page waiting. */
+export async function getService<T>(contributionId: string, timeoutMs = 10_000): Promise<T> {
   if (!channel) throw new Error("Not connected to Azure DevOps");
-  return channel.call<T>("getService", SERVICE_MANAGER, [contributionId]);
+  return channel.call<T>("getService", SERVICE_MANAGER, [contributionId], undefined, undefined, { ms: timeoutMs, what: `Host service ${contributionId}` });
 }
 
 export function onThemeChanged(fn: (theme: Record<string, string>) => void): void {
   themeListener = fn;
-}
-
-/** Open a page of Azure DevOps in the host's own window (falls back to a new tab). */
-export async function navigateHost(url: string): Promise<void> {
-  try {
-    const nav = await getService<{ navigate: (u: string) => Promise<void> }>("ms.vss-features.host-navigation-service");
-    await nav.navigate(url);
-  } catch {
-    window.open(url, "_blank", "noopener");
-  }
 }
