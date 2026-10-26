@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Iteration, WorkItem } from "../src/api/types.ts";
-import { canSplit, cleanupSteps, continuedTitle, dropNeighbors, escapeHtml, nextSprint, sprintOver, tasksInSprint, workingDaysLeft } from "../src/views/sprintlogic.ts";
+import { canSplit, cleanupSteps, continuedTitle, dropNeighbors, escapeHtml, guardSteps, nextSprint, sprintOver, tasksInSprint, workingDaysLeft } from "../src/views/sprintlogic.ts";
 
 const sp = (n: number, start: string, finish: string): Iteration => ({ id: `s${n}`, name: `Sprint ${n}`, path: `P\\Sprint ${n}`, start: `${start}T00:00:00Z`, finish: `${finish}T00:00:00Z` });
 const S1 = sp(1, "2026-09-28", "2026-10-09");
@@ -43,7 +43,28 @@ test("move: the story and its chosen tasks go to the next sprint", () => {
   const t1 = w(11, { type: "Task" });
   const t2 = w(12, { type: "Task", iteration: S3.path });
   const steps = cleanupSteps([{ story: w(1), mode: "move", tasks: [t1, t2] }], S3.path);
-  assert.deepEqual(steps, [{ kind: "iteration", id: 1, path: S3.path }, { kind: "iteration", id: 11, path: S3.path }]);
+  assert.deepEqual(steps, [{ kind: "iteration", id: 1, path: S3.path, ref: "move-1" }, { kind: "iteration", id: 11, path: S3.path, after: "move-1" }]);
+  // the story is already there: its tasks depend on nothing
+  assert.deepEqual(cleanupSteps([{ story: w(2, { iteration: S3.path }), mode: "move", tasks: [t1] }], S3.path), [{ kind: "iteration", id: 11, path: S3.path }]);
+});
+
+test("a story that fails to move keeps its tasks; nothing goes under a copy that was not made", async () => {
+  const steps = cleanupSteps([
+    { story: w(1), mode: "move", tasks: [w(11, { type: "Task" })] },
+    { story: w(2), mode: "move", tasks: [w(21, { type: "Task" })] },
+    { story: w(3), mode: "split", tasks: [w(31, { type: "Task" })] },
+  ], S3.path);
+  const ran: number[] = [];
+  const jobs = guardSteps<null, string>(steps, async (s) => {
+    const id = s.kind === "copy" ? s.from : s.id;
+    if (id === 1 || id === 3) throw new Error("refused");
+    ran.push(id);
+    return "done";
+  }, () => "skipped");
+  const out: string[] = [];
+  for (const j of jobs) out.push(await j(null).catch(() => "failed"));
+  assert.deepEqual(out, ["failed", "skipped", "done", "done", "failed", "skipped", "skipped"]);
+  assert.deepEqual(ran, [2, 21]);
 });
 
 test("split: a copy under the same parent, then the open tasks go under it and to the next sprint", () => {
@@ -54,8 +75,8 @@ test("split: a copy under the same parent, then the open tasks go under it and t
   ], S3.path);
   assert.deepEqual(steps, [
     { kind: "copy", ref: "copy-1", from: 1, title: "Search (continued)", path: S3.path, parent: 50 },
-    { kind: "reparent", id: 11, ref: "copy-1" },
-    { kind: "iteration", id: 11, path: S3.path },
+    { kind: "reparent", id: 11, ref: "copy-1", after: "copy-1" },
+    { kind: "iteration", id: 11, path: S3.path, after: "copy-1" },
   ]);
 });
 
