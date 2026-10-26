@@ -106,7 +106,7 @@ activity and hours. One click in a story's details panel adds the ones that are 
 
 **What permissions does it ask for, and why?** Work items, read and write (to show your work and save the changes you make). Code, read only (to show pull requests: it can never change your code or approve, merge or abandon a pull request). Project and team, read (teams, sprints, board columns). Graph, read (people's pictures).
 
-**Where is my data kept?** Your work stays in your work items. The team's settings (rules on moves, checklists, standard tasks, pillars), retros and planning poker are kept in this extension's storage in your organization. Your own view choices, such as filters, are kept in your browser. Nothing is sent anywhere else.
+**Where is my data kept?** Your work stays in your work items. The team's settings (rules on moves, checklists, standard tasks, pillars), retros and planning poker are kept in this extension's storage in your organization. Your own view choices, such as filters, are kept in your browser and in your own storage in Azure DevOps (readable only by you), so they follow you to another browser. Nothing is sent anywhere else.
 
 **Does it change my process, board or fields?** No. Moving a card changes the same fields the Azure DevOps board changes (state, board column, sprint, parent, order). Nothing is added to your process.
 

@@ -85,6 +85,11 @@ export function collectionName(kind: string, project: string, team: string): str
   return byId;
 }
 
+/** A collection of its own for one part of a team's collection (one retrospective board's notes), so a read takes only that part. */
+export function subCollectionName(base: string, part: string): string {
+  return storageName([base, "part", compactId(part)]);
+}
+
 /** The collection of a project's documents of one kind (checklists): by the project's id once known, else by its name. */
 export function projectCollectionName(kind: string, project: string): string {
   const name = storageName([kind, project]);

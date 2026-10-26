@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { RetroBoard, RetroNote } from "../src/views/retrologic.ts";
-import { nextPhase, ordered, previousBoard, ranked, totalVotes, visibleNotes, vote, votesUsed } from "../src/views/retrologic.ts";
+import type { RetroBallot, RetroBoard, RetroDoc, RetroNote } from "../src/views/retrologic.ts";
+import { ballotId, ballotVote, mergeRetroDocs, myVotesOn, myVotesUsed, newSalt, nextPhase, noteTotals, ordered, previousBoard, ranked, strays, totalVotes, visibleNotes, vote, voterCount, votesUsed } from "../src/views/retrologic.ts";
+import { mySalt } from "../src/views/retro.ts";
 
 const note = (id: string, votes: Record<string, number> = {}, created = "2026-10-01T10:00:00Z", author?: string): RetroNote =>
   ({ id, kind: "note", board: "it1", column: "good", text: id, created, votes, author });
@@ -47,4 +48,63 @@ test("ranked: one list across columns, most votes first, then oldest", () => {
   const c = { ...note("c", { y: 1 }, "2026-10-01T09:00:00Z"), column: "ideas" };
   const d = note("d", {}, "2026-10-01T08:00:00Z");
   assert.deepEqual(ranked([a, b, c, d]).map((n) => n.id), ["b", "c", "a", "d"]);
+});
+
+test("ballots: votes without names, counted with the older votes on the notes", async () => {
+  const ann = await ballotId("board-it1", "Ann@x.example", "salt-a");
+  assert.match(ann, /^ballot-[0-9a-f]{40}$/);
+  assert.equal(await ballotId("board-it1", "ann@x.example", "salt-a"), ann, "the same person, board and salt: the same ballot");
+  assert.notEqual(await ballotId("board-it2", "ann@x.example", "salt-a"), ann, "another board: another id");
+  assert.notEqual(await ballotId("board-it1", "bob@x.example", "salt-a"), ann);
+  assert.notEqual(await ballotId("board-it1", "ann@x.example", "salt-b"), ann, "without the salt nobody can make it");
+  assert.doesNotMatch(ann, /ann/i);
+  assert.match(newSalt(), /^[0-9a-f]{64}$/);
+  assert.notEqual(newSalt(), newSalt());
+
+  const notes = [note("a", { "ann@x": 1 }), note("b")];
+  const mine: RetroBallot = { id: ann, kind: "ballot", board: "it1", votes: { a: 1, b: 2, gone: 4 } };
+  const other: RetroBallot = { id: "ballot-2", kind: "ballot", board: "it1", votes: { b: 1 } };
+  const totals = noteTotals(notes, [mine, other]);
+  assert.deepEqual([...totals], [["a", 2], ["b", 3]], "a vote on a deleted note does not count");
+  assert.equal(myVotesOn(notes[0], mine, "ANN@x"), 2, "older and new votes of mine");
+  assert.equal(myVotesUsed(notes, mine, "ann@x"), 4, "a vote on a deleted note is free again");
+  assert.equal(voterCount(notes, [mine, other, { id: "ballot-3", kind: "ballot", board: "it1", votes: { gone: 1 } }]), 3, "one name on a note, two ballots with votes");
+  assert.deepEqual(ranked(notes, (n) => totals.get(n.id) ?? 0).map((n) => n.id), ["b", "a"]);
+  assert.deepEqual(ordered(notes, "vote", (n) => totals.get(n.id) ?? 0).map((n) => n.id), ["b", "a"]);
+});
+
+test("ballots: a vote is added while votes are left, and only my own ballot votes are taken back", () => {
+  const made = ballotVote(null, "ballot-x", "it1", "a", 1, 1)!;
+  assert.deepEqual(made, { id: "ballot-x", kind: "ballot", board: "it1", votes: { a: 1 } });
+  assert.equal(ballotVote(made, "ballot-x", "it1", "a", 1, 0), null, "no votes left");
+  assert.deepEqual(ballotVote(made, "ballot-x", "it1", "a", -1, 0)?.votes, {});
+  assert.equal(ballotVote(made, "ballot-x", "it1", "b", -1, 5), null, "no vote of mine on b in the ballot");
+  assert.deepEqual(made.votes, { a: 1 }, "the ballot given is not changed");
+});
+
+test("retro storage: a split board's notes come from its own collection; older boards' from the team's", () => {
+  const board = (iteration: string, apart: boolean): RetroBoard => ({ id: "board-" + iteration, kind: "board", iteration, iterationName: iteration, columns: [], phase: "write", votesPerPerson: 5, anonymous: true, created: "2026-01-01", createdBy: "x", notesApart: apart || undefined });
+  const main: RetroDoc[] = [board("s1", false), board("s2", true), { ...note("old1"), board: "s1" }, { ...note("old2"), board: "s2", text: "old copy" }];
+  const own = new Map<string, RetroDoc[]>([["s2", [{ ...note("old2"), board: "s2", text: "moved" }, { ...note("new"), board: "s2" }]], ["s1", [{ id: "ballot-1", kind: "ballot", board: "s1", votes: {} }]]]);
+  const docs = mergeRetroDocs(main, own);
+  assert.deepEqual(docs.map((d) => d.id).sort(), ["ballot-1", "board-s1", "board-s2", "new", "old1", "old2"]);
+  assert.equal((docs.find((d) => d.id === "old2") as RetroNote).text, "moved", "the old copy of a split board's note is not used");
+  // a note written to the team's collection just before the split is found to copy over
+  const late: RetroNote = { ...note("late"), board: "s2" };
+  assert.deepEqual(strays([...main, late], own.get("s2")!, "s2").map((d) => d.id), ["late"]);
+  assert.deepEqual(strays(main, own.get("s2")!, "s2"), []);
+});
+
+test("the person's salt for vote ids: made once in their own storage, read after; never made when only reading", async () => {
+  const kept = new Map<string, Record<string, unknown>>();
+  const api = {
+    async getDoc(_c: string, id: string) { const d = kept.get(id); return d ? { ...d, id } : null; },
+    async createDoc(_c: string, doc: { id: string }) { if (kept.has(doc.id)) throw Object.assign(new Error("exists"), { status: 409 }); kept.set(doc.id, { ...doc }); return { ...doc, __etag: 1 }; },
+  } as unknown as Parameters<typeof mySalt>[0];
+  await assert.rejects(mySalt(api, false), /No votes of yours/);
+  assert.equal(kept.size, 0);
+  const s = await mySalt(api, true);
+  assert.match(s, /^[0-9a-f]{64}$/);
+  assert.equal(await mySalt(api, true), s, "the same salt next time");
+  assert.equal(await mySalt(api, false), s);
 });
