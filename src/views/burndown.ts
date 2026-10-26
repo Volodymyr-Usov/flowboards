@@ -3,7 +3,8 @@
 // Pure logic, no page: covered by test/burndown.test.ts.
 //
 // A task counts on a day when it existed, sat in the sprint and was not closed.
-import { DAY, isUnder } from "../core/model.ts";
+import { isUnder } from "../core/model.ts";
+import { dayKey, planDay, weekday } from "./timeaxis.ts";
 
 /** A task as it is now: what decides the remaining work of a task closed without ever recording it. */
 export interface TaskNow {
@@ -60,21 +61,24 @@ export function remainingOf(fields: Record<string, unknown> | undefined, task: T
   return num(raw);
 }
 
-/** ISO dates (yyyy-mm-dd, UTC) of the working days from start to finish, both included, minus days off. */
+/**
+ * Day keys (yyyy-mm-dd) of the working days from start to finish, both included, minus days off.
+ * Sprint dates and days off are planning dates: read as the day they name in any time zone.
+ */
 export function sprintDays(start: string, finish: string, workDays: number[], daysOff: { start: string; end: string }[] = []): string[] {
-  const a = Date.parse(start.slice(0, 10));
-  const b = Date.parse(finish.slice(0, 10));
+  const a = planDay(start);
+  const b = planDay(finish);
   const out: string[] = [];
-  if (Number.isNaN(a) || Number.isNaN(b)) return out;
-  for (let t = a; t <= b; t += DAY) {
-    if (!workDays.includes(new Date(t).getUTCDay())) continue;
-    if (daysOff.some((o) => t >= Date.parse(o.start.slice(0, 10)) && t <= Date.parse(o.end.slice(0, 10)))) continue;
-    out.push(new Date(t).toISOString().slice(0, 10));
+  if (a == null || b == null) return out;
+  const off = daysOff.map((o) => ({ s: planDay(o.start), e: planDay(o.end) })).filter((o): o is { s: number; e: number } => o.s != null && o.e != null);
+  for (let d = a; d <= b; d++) {
+    if (!workDays.includes(weekday(d))) continue;
+    if (off.some((o) => d >= o.s && d <= o.e)) continue;
+    out.push(dayKey(d));
   }
   return out;
 }
 
-/** The moment each working day is measured: its end, or now for today; null for days still to come. */
 /**
  * Did the "as of" reads miss history? Azure DevOps answers "as of" by when a change was saved, so
  * history written later with earlier dates (a migration from another tool, imported data) is not
@@ -104,10 +108,22 @@ export function snapshotsFromRevisions(revs: Map<number, { changed: string; fiel
   });
 }
 
+/**
+ * The tasks of a burndown: those in the sprint now and those that were in it at the end of any past
+ * day (moved out since), each once. Taking only today's would rewrite the past days.
+ */
+export function everInSprint(now: number[], before: number[][]): number[] {
+  return [...new Set([...now, ...before.flat()])].sort((a, b) => a - b);
+}
+
+/** The moment each working day is measured: its end (local time), or now for today; null for days still to come. */
 export function dayMoments(days: string[], now = Date.now()): (string | null)[] {
   return days.map((d) => {
-    const start = Date.parse(d);
-    return start > now ? null : new Date(Math.min(start + DAY - 1, now)).toISOString();
+    // the person's own day: from local midnight to the next local midnight
+    const [y, m, dd] = d.split("-").map(Number);
+    const start = new Date(y, m - 1, dd).getTime();
+    const end = new Date(y, m - 1, dd + 1).getTime() - 1;
+    return start > now ? null : new Date(Math.min(end, now)).toISOString();
   });
 }
 

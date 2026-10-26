@@ -164,6 +164,8 @@ export interface QuerySpec {
   closedAfter?: string;
   closedBefore?: string;
   orderBy?: "changed" | "id" | "closed";
+  /** ISO moment: the items that matched then (WIQL ASOF), e.g. tasks that were in a sprint on a past day */
+  asOf?: string;
   /** at most this many ids (Azure DevOps answers at most 20,000) */
   top?: number;
 }

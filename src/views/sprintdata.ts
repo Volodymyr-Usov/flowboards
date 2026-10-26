@@ -1,17 +1,22 @@
 // Sprint numbers read from Azure DevOps: the burndown and the velocity. No page: the Sprint page and the
 // Taskboard use the same code.
 import type { Api } from "../api/api.ts";
-import type { Iteration } from "../api/types.ts";
+import type { Iteration, QuerySpec } from "../api/types.ts";
 import { isUnder, statesOf } from "../core/model.ts";
 import { pool } from "../core/teamplans.ts";
 import type { Workspace } from "../core/workspace.ts";
-import { AS_OF_FIELDS, burndown, dayMoments, missedHistory, snapshotsFromRevisions, sprintDays } from "./burndown.ts";
+import { AS_OF_FIELDS, burndown, dayMoments, everInSprint, missedHistory, snapshotsFromRevisions, sprintDays } from "./burndown.ts";
 import type { BurndownPoint } from "./burndown.ts";
 
 /** reading "as of" each day takes two requests a day per 400 tasks: past this the chart would be slow */
 export const MAX_TASKS = 2000;
 /** reading each task's revisions (when "as of" misses imported history) takes a request per task */
 export const MAX_REVISION_TASKS = 400;
+
+/** The team's items of these types in a sprint: only the team's own areas, as other teams may share the sprint. */
+export function sprintQuery(ws: Pick<Workspace, "settings">, types: string[], path: string): QuerySpec {
+  return { types, areas: ws.settings.areas.length ? ws.settings.areas : undefined, iterationUnder: path };
+}
 
 export type BurndownResult =
   | { kind: "points"; points: BurndownPoint[] }
@@ -27,18 +32,27 @@ export async function loadBurndown(api: Api, ws: Workspace, it: Iteration, opts:
   const task = ws.taskLevel();
   if (!task || !it.start || !it.finish) return { kind: "noTasks" };
   const remainingField = ws.process.fields.remaining;
-  const ids = await api.query(ws.project, { types: task.types, areas: ws.settings.areas.length ? ws.settings.areas : undefined, iterationUnder: it.path });
-  if (!alive()) return null;
-  if (ids.length > MAX_TASKS) return { kind: "tooMany", tasks: ids.length };
-  if (!ids.length) return { kind: "noTasks" };
+  const now = opts.now ?? Date.now();
+  const spec = sprintQuery(ws, task.types, it.path);
   // the team's days off are not working days of the sprint
-  const [items, teamOff] = await Promise.all([
-    api.items(ws.project, ids),
+  const [current, teamOff] = await Promise.all([
+    api.query(ws.project, spec),
     api.capacity(ws.project, ws.team, it.id).then((c) => c.teamDaysOff, () => [] as { start: string; end: string }[]),
   ]);
   if (!alive()) return null;
   const days = sprintDays(it.start, it.finish, ws.settings.workingDays, teamOff);
-  const moments = dayMoments(days, opts.now);
+  const moments = dayMoments(days, now);
+  // tasks moved out of the sprint since ("move unfinished") still count on the days they were in it:
+  // ask which tasks were in the sprint at the end of each past day, not only which are in it now
+  const past = moments.filter((m): m is string => m != null && Date.parse(m) < now);
+  opts.onProgress?.("Finding the tasks that were in the sprint each day…");
+  const before = await pool(past, 3, (m) => api.query(ws.project, { ...spec, asOf: m }));
+  if (!alive()) return null;
+  const ids = everInSprint(current, before);
+  if (ids.length > MAX_TASKS) return { kind: "tooMany", tasks: ids.length };
+  if (!ids.length) return { kind: "noTasks" };
+  const items = await api.items(ws.project, ids);
+  if (!alive()) return null;
   // each day's tasks as they were at its end: a few requests a day, three days at a time
   let read = 0;
   const total = moments.filter(Boolean).length;
@@ -73,7 +87,7 @@ export async function loadBurndown(api: Api, ws: Workspace, it: Iteration, opts:
 /** A sprint's velocity: the effort of its finished stories (requirement level, Completed states). */
 export async function sprintVelocity(api: Api, ws: Workspace, reqTypes: string[], path: string): Promise<number> {
   const done = statesOf(ws.process, reqTypes, ["Completed"]);
-  const ids = await api.query(ws.project, { types: reqTypes, areas: ws.settings.areas.length ? ws.settings.areas : undefined, iterationUnder: path, states: done });
+  const ids = await api.query(ws.project, { ...sprintQuery(ws, reqTypes, path), states: done });
   const items = ids.length ? await api.items(ws.project, ids) : [];
   return items.filter((w) => isUnder(w.iteration, path)).reduce((s, w) => s + (w.effort ?? 0), 0);
 }

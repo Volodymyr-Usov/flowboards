@@ -39,7 +39,7 @@ export function toWiql(spec: QuerySpec, currentProject: string): string {
     id: "[System.Id] ASC",
     closed: "[Microsoft.VSTS.Common.ClosedDate] DESC",
   }[spec.orderBy ?? "id"];
-  return `SELECT [System.Id] FROM WorkItems${where.length ? " WHERE " + where.join(" AND ") : ""} ORDER BY ${order}`;
+  return `SELECT [System.Id] FROM WorkItems${where.length ? " WHERE " + where.join(" AND ") : ""} ORDER BY ${order}${spec.asOf ? ` ASOF ${q(spec.asOf)}` : ""}`;
 }
 
 /** WIQL compares dates by day unless asked for time precision. */
