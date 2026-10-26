@@ -56,6 +56,26 @@ test("waitingOn: the author when the merge has conflicts or failed", () => {
   assert.equal(waitingOn(pr([{ person: bob, vote: -5 }], { mergeStatus: "conflicts" })).why, "changes");
 });
 
+test("waitingOn: approved and set to auto-complete waits for the checks, not the author", () => {
+  const w = waitingOn(pr([{ person: bob, vote: 10 }], { autoComplete: true }));
+  assert.equal(w.kind, "policies");
+  assert.deepEqual(w.people, []);
+  // not approved yet: still the reviewers, auto-complete or not
+  assert.equal(waitingOn(pr([{ person: bob, vote: 0 }], { autoComplete: true })).kind, "reviewers");
+  // a required reviewer without a vote still comes first
+  assert.deepEqual(waitingOn(pr([{ person: bob, vote: 10 }, { person: cy, vote: 0, isRequired: true }], { autoComplete: true })).people, [cy]);
+});
+
+test("waitingOn: a reviewer who declined is not waited on (unless required)", () => {
+  const w = waitingOn(pr([{ person: bob, vote: 0, hasDeclined: true }, { person: cy, vote: 0 }]));
+  assert.deepEqual(w.people, [cy]);
+  assert.equal(waitingOn(pr([{ person: bob, vote: 0, hasDeclined: true }])).kind, "none");
+  assert.equal(waitingOn(pr([{ person: bob, vote: 10 }, { person: cy, vote: 0, hasDeclined: true }])).why, "complete");
+  assert.deepEqual(waitingOn(pr([{ person: bob, vote: 0, hasDeclined: true, isRequired: true }])).people, [bob]);
+  assert.equal(needsReviewBy(pr([{ person: bob, vote: 0, hasDeclined: true }]), bob), false);
+  assert.equal(needsReviewBy(pr([{ person: bob, vote: 0 }]), bob), true);
+});
+
 test("shortName, shownPerson and namesText", () => {
   assert.equal(shortName("[Fabrikam]\\Web Team"), "Web Team");
   assert.equal(shortName("Ann Lee"), "Ann Lee");
