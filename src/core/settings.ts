@@ -103,9 +103,14 @@ export function cleanRule(v: unknown, index = 0): Rule | null {
     ...r,
     id: typeof r.id === "string" && r.id ? r.id : `rule-${index + 1}`,
     level, target,
-    requires: texts(r.requires).filter((q) => KNOWN_REQUIREMENTS.has(q)),
     onlyBy: texts(r.onlyBy),
   };
+  // what a newer version asks for that this one does not know is not checked, but kept apart, so a save from
+  // this version does not drop it; a version that knows it takes it back
+  const asked = [...new Set([...texts(r.requires), ...texts(r.unknownRequires)])];
+  out.requires = asked.filter((q) => KNOWN_REQUIREMENTS.has(q));
+  const unknown = asked.filter((q) => !KNOWN_REQUIREMENTS.has(q));
+  if (unknown.length) out.unknownRequires = unknown; else delete out.unknownRequires;
   if ("fields" in r) out.fields = texts(r.fields);
   if ("from" in r) { if (typeof r.from === "string" && r.from.trim()) out.from = r.from; else delete out.from; }
   if ("note" in r && typeof r.note !== "string") delete out.note;

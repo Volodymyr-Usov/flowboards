@@ -833,6 +833,9 @@ export const treeView: View = {
     // ---- drag and drop (pointer events) ----
     let drag: { node: TNode; x: number; y: number; started: boolean; ghost?: HTMLElement; drop: Drop | null; pointerId: number } | null = null;
     let intoRow: HTMLElement | null = null;
+    /** a change came during a drag: the rows are drawn again when it ends (a redraw would drop the dragged row) */
+    let refreshAfterDrag = false;
+    let gone = false;
 
     // dragging works while searching or filtering too: the order is set against all the siblings, hidden ones included
     tbody.addEventListener("pointerdown", (e) => {
@@ -929,6 +932,8 @@ export const treeView: View = {
       document.removeEventListener("pointercancel", cancelDrag);
       document.removeEventListener("keydown", onKey, true);
       setTimeout(() => { suppressClick = false; }, 0);
+      // after the drop's own write has started and the pointer's click is over
+      if (refreshAfterDrag) setTimeout(() => { if (!gone && !drag && refreshAfterDrag) { refreshAfterDrag = false; refresh(); } }, 0);
     }
 
     async function doDrop(d: TNode, drop: Drop): Promise<void> {
@@ -947,7 +952,14 @@ export const treeView: View = {
       const prev = drop.mode === "before" ? sibs[i - 1] : t;
       const next = drop.mode === "before" ? t : sibs[i + 1];
       const reorder = !(prev?.id === d.id || next?.id === d.id);
-      if (d.parent === parent) { if (reorder) await app.actions.reorder(d.id, prev?.id ?? 0, next?.id ?? 0); return; }
+      if (d.parent === parent) {
+        // dropped back where it already is (right after prev and right before next): nothing to send
+        const all = (parent ? parent.kids : roots).filter((k) => k.item && k.level.rank === d.level.rank);
+        const j = all.indexOf(d);
+        if (j >= 0 && all[j - 1]?.id === prev?.id && all[j + 1]?.id === next?.id) return;
+        if (reorder) await app.actions.reorder(d.id, prev?.id ?? 0, next?.id ?? 0);
+        return;
+      }
       // a new parent and a place among its children: one message, one Undo for both
       let moved = false;
       await app.actions.batch(`${lbl(d.item!)} is now under ${parent?.item ? lbl(parent.item) : "no parent"}`, [
@@ -972,12 +984,18 @@ export const treeView: View = {
       if (reveal != null) showNew();
     };
     // progress counts of the children that are not loaded: drawn when read (not under a drag; the next update has them)
-    const childCounts = new ChildCounts(ws, () => { if (!drag) refresh(); });
+    const childCounts = new ChildCounts(ws, () => { if (!drag) refresh(); else if (drag.started) refreshAfterDrag = true; });
     paintSort();
     refresh();
 
     return {
-      update(changed) { childCounts.changed(changed); if (drag) cancelDrag(); refresh(); },
+      update(changed) {
+        childCounts.changed(changed);
+        // a drag under way (the 30-second read, a save) is not dropped: the rows are drawn again when it ends
+        if (drag?.started) { refreshAfterDrag = true; return; }
+        if (drag) cancelDrag();
+        refresh();
+      },
       select(id) {
         select_(id);
         // the keyboard goes on from the open item
@@ -988,7 +1006,7 @@ export const treeView: View = {
         const row = rows.get(id);
         if (row) row.tabIndex = 0;
       },
-      unmount() { cancelDrag(); saveOpen(); childCounts.stop(); document.removeEventListener("keydown", onEsc); },
+      unmount() { gone = true; cancelDrag(); saveOpen(); childCounts.stop(); document.removeEventListener("keydown", onEsc); },
     };
   },
 };

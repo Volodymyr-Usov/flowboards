@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { REL } from "../src/api/api.ts";
 import type { WorkItem } from "../src/api/types.ts";
 import { pool } from "../src/core/teamplans.ts";
-import { cleanTeams, conflictCounts, dependencies, dependencyPairs, dragsFor } from "../src/views/roadmaplogic.ts";
+import { cleanTeams, conflictCounts, dependencies, dependencyPairs, dragsFor, forecastNote, isLate } from "../src/views/roadmaplogic.ts";
 
 test("roadmap drags only the dates the type has", () => {
   assert.deepEqual(dragsFor({ start: true, target: true }), { move: true, start: true, end: true });
@@ -58,4 +58,19 @@ test("the team loader runs at most a few jobs at once and keeps the order", asyn
   });
   assert.deepEqual(out, [50, 10, 40, 20, 30]);
   assert.equal(most, 2);
+});
+
+test("late only against a real target date, never against an end made up from a start date or the sprints", () => {
+  const today = 100;
+  assert.equal(isLate(false, 90, today), true, "the target date has passed");
+  assert.equal(isLate(false, 100, today), false, "the target day itself is not late yet");
+  assert.equal(isLate(true, 90, today), false, "done work is never late");
+  assert.equal(isLate(false, null, today), false, "only a start date: no target, so not late");
+  assert.equal(isLate(false, undefined, today), false);
+});
+
+test("the likely-dates note says why there are none: nothing finished, or nothing open to forecast", () => {
+  assert.match(forecastNote(30, 4, 2.5, "Feature"), /^Likely dates from 30 stories/);
+  assert.equal(forecastNote(30, 0, 2.5, "Feature"), "No open Feature has open stories under it, so there is nothing to forecast.");
+  assert.match(forecastNote(0, 0, 0, "Feature"), /^No stories were finished/);
 });

@@ -320,3 +320,14 @@ test("comments: every page up to 1,000, and a Markdown comment as its rendered H
     assert.equal(cs[1].text, "**hi**", "an HTML comment keeps its text");
   } finally { f.restore(); }
 });
+
+test("team days off: a sprint without any is an empty list, but a failed read is an error (a save after it would wipe them)", async () => {
+  let answer = 404;
+  const f = withFetch((c) => (/teamdaysoff/.test(c.url) ? json({ message: "no" }, answer) : json({ teamMembers: [] })));
+  try {
+    const api = new RestApi(ctx, async () => "t");
+    assert.deepEqual((await api.capacity("P", "T", "i1")).teamDaysOff, []);
+    answer = 500;
+    await assert.rejects(api.capacity("P", "T", "i1"));
+  } finally { f.restore(); }
+});

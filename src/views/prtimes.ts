@@ -64,7 +64,13 @@ export function prTimesCard(app: App, weeks: () => number): { el: HTMLElement; l
     const seg = teamKnown ? segmented<"team" | "all">([
       { value: "team", label: "My team", title: `Pull requests that a member of ${app.ws.team} wrote or was asked to review (who the members are: Settings > Team)` },
       { value: "all", label: "Everyone", title: `Every pull request of ${app.ws.project}` },
-    ], who, (v) => { who = v; prefs.set("flow:prwho", v); draw(); }) : null;
+    ], who, (v) => {
+      who = v;
+      prefs.set("flow:prwho", v);
+      // the first approvals were read for the pull requests shown before: read those still unknown, else only draw
+      if (prs && !reading && prs.some((p) => (v === "all" || isTeamPr(app, p, keys)) && approvedAt(app, p) === undefined)) void load();
+      else draw();
+    }) : null;
     const head = h("div.flow-card-head", null, h("h2", null, "Pull requests: waiting and merging"),
       help(`From the pull requests of ${app.ws.project} that were completed in the last ${w} weeks. Wait for the first approval: from the day the pull request was opened to its first approving vote (pull requests that were never approved are left out of that one). Time to merge: from opened to completed, including any time it spent as a draft. The weekly line is the median (the middle value) of the pull requests completed that week; the figures above are for the whole period, with the 85th percentile next to the median. The first approvals are read once and kept in the team's storage, so later visits are quick.`),
       h("span.spacer"), seg);
@@ -89,8 +95,10 @@ export function prTimesCard(app: App, weeks: () => number): { el: HTMLElement; l
     const key = h("div.prs-times-head", null,
       h("span.prs-key.ap", null, h("i"), "Wait for first approval (median per week)"),
       h("span.prs-key.mg", null, h("i"), "Time to merge (median per week)"));
+    // not known yet is not "never approved": say how many the approval figures leave out
+    const unknown = rows.filter((r) => !r.known).length;
     const note = reading ? h("p.small.muted", null, `Reading first approvals… ${left} to go (kept in the team's storage for the next visit).`)
-      : left ? h("p.small.muted", null, `${left} older pull requests have no approval time yet; the next visit reads more.`) : "";
+      : unknown ? h("p.small.muted", null, `${unknown} of ${rows.length} pull requests have no approval time yet, so the approval figures leave them out; the next visit reads more.`) : "";
     el.replaceChildren(head, scope, tiles, key, timesChart(weeklyTimes(rows, weekCount)), note);
   }
 
@@ -104,13 +112,18 @@ export function prTimesCard(app: App, weeks: () => number): { el: HTMLElement; l
       if (stopped || my !== token) return;
       prs = list;
       draw();
-      // the first approvals: from the team's storage, the rest read (and kept)
-      const wanted = list.filter((p) => who === "all" || isTeamPr(app, p, keys));
+      // the first approvals: from the team's storage, the rest read (and kept). A switch between "My team" and
+      // "Everyone" while they are read gives one more round, for the pull requests that choice adds
       reading = true;
-      left = wanted.length;
-      const res = await readApprovals(app, wanted, () => stopped || my !== token, () => { left = Math.max(0, left - 1); if (!stopped && my === token) draw(); });
+      for (let round = 0; round < 2; round++) {
+        const scope = who;
+        const wanted = list.filter((p) => scope === "all" || isTeamPr(app, p, keys));
+        left = wanted.length;
+        const res = await readApprovals(app, wanted, () => stopped || my !== token, () => { left = Math.max(0, left - 1); if (!stopped && my === token) draw(); });
+        left = res.left;
+        if (stopped || my !== token || who === scope) break;
+      }
       reading = false;
-      left = res.left;
     } catch (e) {
       if (stopped || my !== token) return;
       error = e;

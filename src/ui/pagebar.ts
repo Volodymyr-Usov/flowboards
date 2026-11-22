@@ -51,6 +51,9 @@ export function filteredSummary(parts: FilterPart[]): { text: string; title: str
 
 /** The details panel's width as a CSS variable on the page (--panel-w), so the page makes room for it (10-shell.css). */
 let panelFollowed = false;
+/** the page bars that listen to block changes, each with the way to stop */
+const bars = new Set<{ gone: () => boolean; stop: () => void }>();
+
 function followPanelWidth(): void {
   if (panelFollowed) return;
   const panel = document.querySelector<HTMLElement>("aside.panel");
@@ -299,9 +302,14 @@ export function pageBar(app: App, opts: PageBarOpts = {}): PageBar {
   const row = h("div.pb-line.pb-2", null, field, line2, line3, filtered, end, moreBtn, panel);
   const el = h("div.page-bar", null, row);
   row.addEventListener(FILTERS_CHANGED, paintFiltered);
-  // a block switched off or on (Settings, a ×) changes the "(1 hidden)"; the listener goes once the page bar left the page
+  // a block switched off or on (Settings, a ×) changes the "(1 hidden)"; the listener goes once the page bar left the page:
+  // at the next block change, or when the next page bar is made (else each page left would stay in memory until then)
   let shown = false;
-  const stop = onBlocksChange(() => { if (row.isConnected) { shown = true; paintFiltered(); } else if (shown) stop(); });
+  for (const b of [...bars]) if (b.gone()) { b.stop(); bars.delete(b); }
+  const me = { gone: () => shown && !row.isConnected, stop: () => {} };
+  const stop = onBlocksChange(() => { if (row.isConnected) { shown = true; paintFiltered(); } else if (shown) { stop(); bars.delete(me); } });
+  me.stop = stop;
+  bars.add(me);
   fitLine(row, moreBtn, panel, filtered, () => { shown ||= row.isConnected; paintFiltered(); });
   followPanelWidth();
   return {

@@ -100,15 +100,23 @@ export const recycleBinView: View = {
       draw();
     }
 
-    function draw(): void {
+    function syncRestore(): void {
       restoreSel.disabled = !picked.size;
       restoreSel.lastChild!.textContent = picked.size ? `Restore ticked (${picked.size})` : "Restore ticked";
+    }
+
+    function draw(): void {
+      syncRestore();
       if (error) { status.textContent = ""; body.replaceChildren(failed(error, () => void load())); return; }
       if (!list) { status.textContent = ""; body.replaceChildren(spinner("Reading the Recycle Bin…")); return; }
       const q = bar.search.query();
       const byTeam = scope === "team" && teamAreas.length > 0;
       const matching = list.filter((d) => binMatch(d, q));
       const mine = byTeam ? matching.filter((d) => { const a = areas.get(d.id); return typeof a === "string" && inTeamAreas(a, teamAreas); }) : matching;
+      // a tick holds only while its item can be seen: another scope or search drops it, so "Restore ticked" never restores hidden items
+      const seen = new Set(mine.map((d) => d.id));
+      for (const id of [...picked]) if (!seen.has(id)) picked.delete(id);
+      syncRestore();
       const shown = mine.slice(0, limit);
       const unread = byTeam ? matching.filter((d) => !areas.has(d.id)).length : 0;
       // the reads stopped at the budget: say so, and offer the next ones

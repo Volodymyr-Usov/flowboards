@@ -307,7 +307,8 @@ export function personPicker(api: Api, anchor: Element, people: Person[], curren
     if (!list.children.length) list.append(h("div.muted.pad", null, "Nobody found"));
   };
   input.addEventListener("input", draw);
-  input.addEventListener("keydown", (e) => { if (e.key === "Enter") (list.querySelector(".pick-item") as HTMLElement | null)?.click(); });
+  // Enter takes the first match of what was typed; with nothing typed it does nothing (the first row is "Nobody" / "No parent")
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter" && input.value.trim()) (list.querySelector(".pick-item") as HTMLElement | null)?.click(); });
   draw();
   close = popup(anchor, h("div.picker", null, input, list));
 }
@@ -327,7 +328,8 @@ export function itemPicker(ws: Workspace, anchor: Element, filter: (w: WorkItem)
     if (!list.children.length) list.append(h("div.muted.pad", null, "Nothing found"));
   };
   input.addEventListener("input", draw);
-  input.addEventListener("keydown", (e) => { if (e.key === "Enter") (list.querySelector(".pick-item") as HTMLElement | null)?.click(); });
+  // Enter takes the first match of what was typed; with nothing typed it does nothing (the first row is "Nobody" / "No parent")
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter" && input.value.trim()) (list.querySelector(".pick-item") as HTMLElement | null)?.click(); });
   draw();
   close = popup(anchor, h("div.picker.wide", null, input, list));
 }

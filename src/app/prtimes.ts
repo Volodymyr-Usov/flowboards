@@ -77,6 +77,8 @@ export async function readApprovals(app: App, prs: PullRequest[], stop: () => bo
     m.dirty.add(monthOf(pr.closed!));
     progress?.();
   }, stop);
+  // stopped early (the page was left, the period changed): those not read yet may be asked again next time
+  for (const p of todo) if (!m.approved.has(prKey(p))) m.asked.delete(prKey(p));
   await save(app, prs);
   return { left: prs.filter((p) => p.closed && !m.approved.has(prKey(p))).length };
 }

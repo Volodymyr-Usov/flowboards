@@ -97,6 +97,19 @@ export function keepRenamed(epics: { id: number; tags: string[] }[], before: Pil
   return { epicPillars: out, kept };
 }
 
+/**
+ * What to save when an Epic's pillar is chosen on its card: the choice ("" = by tag again, NONE_VALUE = no pillar,
+ * else a pillar id) and, while the pillars come only from tags (none saved yet), the pillars shown, so the chosen
+ * pillar stays when the tag that made it goes away.
+ */
+export function epicPillarPatch(manual: Record<string, string>, saved: PillarLike[], epicId: number, choice: string, shown: PillarLike[]): { epicPillars: Record<string, string>; pillars?: PillarLike[] } {
+  const epicPillars = { ...manual };
+  if (choice) epicPillars[String(epicId)] = choice;
+  else delete epicPillars[String(epicId)];
+  if (saved.length || choice === NO_PILLAR || choice === NONE_VALUE) return { epicPillars };
+  return { epicPillars, pillars: shown.map((p) => ({ id: p.id, name: p.name, ...(p.color ? { color: p.color } : {}) })) };
+}
+
 /** How the pillar was chosen, for the Epic card's select. */
 export function pillarSource(epicId: number, manual: Record<string, string>, pillars: PillarLike[]): "manual" | "none" | "tag" {
   const m = manual[String(epicId)];

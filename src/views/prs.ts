@@ -319,7 +319,8 @@ export const prsView: View = {
         chip("Mine", f.mine, "Show the pull requests you created", (v) => { f.mine = v; }));
     }
 
-    function filtered(prs: PullRequest[]): PullRequest[] {
+    /** `completed`: for the chart of completed pull requests, where "needs my review" (an open one's question) does not apply */
+    function filtered(prs: PullRequest[], opts: { completed?: boolean } = {}): PullRequest[] {
       const q = bar.search.query();
       return prs.filter((pr) => {
         if (memo.who === "team" && !teamPr(pr)) return false;
@@ -327,7 +328,7 @@ export const prsView: View = {
         if (f.author && personKey(pr.createdBy) !== f.author) return false;
         if (f.reviewer && !pr.reviewers.some((r) => personKey(r.person) === f.reviewer)) return false;
         if (f.group && !pr.reviewers.some((r) => r.isContainer && personKey(r.person) === f.group)) return false;
-        if (f.needsMe && memo.tab === "open" && !needsReviewBy(pr, me)) return false;
+        if (f.needsMe && memo.tab === "open" && !opts.completed && !needsReviewBy(pr, me)) return false;
         if (f.mine && !isAuthor(pr, me)) return false;
         if (q) {
           const hay = `${pr.id} !${pr.id} ${pr.title} ${pr.sourceBranch ?? ""} ${pr.targetBranch ?? ""} ${pr.repository.name} ${pr.repository.project ?? ""}`.toLowerCase();
@@ -453,7 +454,7 @@ export const prsView: View = {
 
     function drawTimes(): void {
       const st = getLoad(app, memo.scope, "completed");
-      const done = filtered(st.prs.filter((p) => p.status === "completed" && p.closed));
+      const done = filtered(st.prs.filter((p) => p.status === "completed" && p.closed), { completed: true });
       const head = h("div.prs-times-head", null,
         h("h3.prs-h", null, "Waiting for approval and time to merge"),
         help(`Per week, by when the pull requests were completed (last ${RECENT_DAYS} days), following the filters above: the median (middle value) time from opened to the first approving vote, and from opened to merged. The Flow page shows the same for longer periods. First approvals are read once and kept in the team's storage.`),
@@ -471,7 +472,9 @@ export const prsView: View = {
       const weeks = Math.max(1, Math.ceil((weekStart(Date.now()) - weekStart(Date.now() - RECENT_DAYS * DAY)) / (7 * DAY)) + 1);
       const data = weeklyTimes(done.map((pr) => { const a = approvedAt(app, pr); return { created: pr.created, closed: pr.closed!, approved: a ? new Date(a).toISOString() : null }; }), weeks);
       const reading = done.filter((pr) => approvedAt(app, pr) === undefined).length;
-      const note = reading && timesBusy ? h("p.small.muted", null, `Reading approvals: ${done.length - reading} of ${done.length}…`) : "";
+      // a visit reads a share of the approvals: when it is done and some are still unknown, say so (they are not in the line)
+      const note = !reading ? "" : timesBusy ? h("p.small.muted", null, `Reading approvals: ${done.length - reading} of ${done.length}…`)
+        : h("p.small.muted", null, `${reading} of ${done.length} pull requests have no approval time yet, so the approval line leaves them out; the next visit reads more.`);
       timesBox.replaceChildren(head, done.length ? timesChart(data) : h("p.small.muted", null, "No pull request was completed in these weeks."), note);
     }
     const drawTimesSoon = debounceTimes(() => drawTimes());

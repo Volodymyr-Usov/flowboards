@@ -191,8 +191,8 @@ export function occurrences(s: Schedule, ctx: ScheduleContext, from: string, to:
     }
     case "period": {
       const offset = Math.round(t.offsetDays);
-      // a month either side: an offset can move a day into the range from the next or the last month
-      for (let m = monthIndex(ymd(lo)) - 2; m <= monthIndex(ymd(hi)) + 2; m++) {
+      // three months either side: an offset of up to 60 days can move a day into the range from three months away
+      for (let m = monthIndex(ymd(lo)) - 3; m <= monthIndex(ymd(hi)) + 3; m++) {
         const inQuarter = m % 3;
         if (t.at === "month-start") add(dayNo(dayOf(m, 1)) + offset);
         else if (t.at === "month-end") add(dayNo(lastDayOf(m)) + offset);

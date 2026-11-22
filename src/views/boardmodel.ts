@@ -142,6 +142,19 @@ export function featureGroups(features: WorkItem[], parentOf: (id: number | unde
   return [...ordered, ...loose.map((f) => ({ epic: null, features: [f] }))];
 }
 
+/**
+ * Where a Feature dropped next to another one in the left list goes, as the neighbours a priority change takes.
+ * `order`: every Feature of the level in backlog order. The list may group Features in Epic boxes, so the ones
+ * drawn next to the target can be far from it in the backlog: the neighbours come from the backlog order.
+ * Above the target: just before it; below: just after it.
+ */
+export function railNeighbours(order: number[], dragged: number, target: number, above: boolean): { prev: number; next: number } {
+  const list = order.filter((id) => id !== dragged);
+  const i = list.indexOf(target);
+  if (i < 0) return above ? { prev: 0, next: target } : { prev: target, next: 0 };
+  return above ? { prev: list[i - 1] ?? 0, next: target } : { prev: target, next: list[i + 1] ?? 0 };
+}
+
 /** Clock colour for days in a column: grey when waiting or done, then green, yellow, red. */
 export function clockClass(days: number, kind: Column["kind"], category: WorkItem["category"]): "neutral" | "green" | "yellow" | "red" {
   if (kind !== "inProgress" || category === "Proposed" || category === "Completed") return "neutral";

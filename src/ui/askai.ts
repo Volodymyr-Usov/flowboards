@@ -103,7 +103,19 @@ async function applyProposal(app: App, p: Proposal): Promise<boolean> {
       if (!it) { toast(`Unknown sprint: ${p.value}`, { kind: "error" }); return false; }
       return Boolean(await a.setField(p.id, "System.IterationPath", it.path));
     }
-    case "tags": return Boolean(await a.setField(p.id, "System.Tags", p.value));
+    case "tags": {
+      // the AI gives the full new list: only what it adds or takes away is sent, applied to the item's newest tags,
+      // so a tag a teammate added meanwhile stays (names compared without case, as Azure DevOps does)
+      const want = p.value.split(";").map((t) => t.trim()).filter(Boolean);
+      const have = ws.get(p.id)?.tags ?? [];
+      const low = (list: string[]) => new Set(list.map((t) => t.toLowerCase()));
+      const haveLow = low(have);
+      const wantLow = low(want);
+      const add = want.filter((t) => !haveLow.has(t.toLowerCase()));
+      const remove = have.filter((t) => !wantLow.has(t.toLowerCase()));
+      if (!add.length && !remove.length) return true;
+      return Boolean(await a.changeTags(p.id, add, remove));
+    }
     case "parent": {
       // "none" takes the parent away; anything but an item number is refused, never read as "no parent"
       if (/^\s*none\s*$/i.test(p.value)) return Boolean(await a.reparent(p.id, 0));

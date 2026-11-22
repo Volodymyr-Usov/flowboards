@@ -538,9 +538,9 @@ export const healthView: View = {
         // not disabled while it runs (that would drop the focus): a second click waits for the first
         fixing.add(c.id);
         try {
-          const r = await app.actions.batch(`${c.title}: ${assign ? `assigned to ${who!.displayName}` : what.toLowerCase()} (${steps.length} items)`,
+          // the batch says itself what failed (with the Undo of what was done): no second message here
+          await app.actions.batch(`${c.title}: ${assign ? `assigned to ${who!.displayName}` : what.toLowerCase()} (${steps.length} items)`,
             steps.map((s) => ({ label: `#${s.id}`, run: s.run! })));
-          if (r.failed.length) toast(`${r.done} done, ${r.failed.length} not: ${r.failed[0].label} ${r.failed[0].error}`, { kind: "error" });
         } finally {
           fixing.delete(c.id);
           // the group may be gone: the next "Fix all", else Checks

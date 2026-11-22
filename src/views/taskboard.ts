@@ -4,11 +4,11 @@
 // its hours to change them; "+" adds a task, "New" in the head a story in this sprint. The Board
 // handles these clicks and the keys (arrows, Enter, Shift+F10 for the menu). A strip on top sums the
 // sprint up; the burndown sits under it.
-import type { Iteration, WorkItem } from "../api/types.ts";
+import type { Category, Iteration, ProcessInfo, WorkItem } from "../api/types.ts";
 import type { App } from "../app/context.ts";
 import { fmtDate, isDone, isUnder, orderedStates, typeColor } from "../core/model.ts";
 import { h, icon } from "../ui/dom.ts";
-import { avatar, stateMark } from "../ui/kit.ts";
+import { avatar, stateMark, toast } from "../ui/kit.ts";
 import { tagChip } from "../ui/tagchip.ts";
 import { workingDaysLeft } from "./sprintlogic.ts";
 import { dayKey, todayDay } from "../core/timeaxis.ts";
@@ -55,8 +55,21 @@ export interface TaskboardInput {
   onlyHits: boolean;
   taskHit: (t: WorkItem) => boolean;
   tags: boolean;
+  /** the team's days off in this sprint (left out of "working days left"), as far as read */
+  teamDaysOff?: { start: string; end: string }[];
   /** the sprint's burndown, shown between the summary and the grid (Scrum teams) */
   burndown?: HTMLElement;
+}
+
+/**
+ * The state a task gets when dropped in a column. The columns are the states of every task type together (bugs
+ * managed with tasks bring their own), so a column may belong to another type: then the task takes its own type's
+ * first state of that column's kind. Null: its type has no state of that kind (a Task has no "Resolved").
+ */
+export function dropState(p: ProcessInfo, type: string, column: { name: string; category: Category }): string | null {
+  const own = orderedStates(p, [type]);
+  if (own.some((s) => s.name === column.name)) return column.name;
+  return own.find((s) => s.category === column.category)?.name ?? null;
 }
 
 /** The sprints to choose from: dated ones in date order, the current one marked. */
@@ -96,11 +109,11 @@ export function taskboard(input: TaskboardInput): HTMLElement {
   // ---------- the strip on top ----------
   const allTasks = [...rows.flatMap((r) => r.tasks), ...loose];
   const remaining = allTasks.filter((t) => !isDone(t)).reduce((a, t) => a + (t.remaining ?? 0), 0);
-  const daysLeft = sprint.start && sprint.finish ? workingDaysLeft(sprint.start, sprint.finish, dayKey(todayDay()), ws.settings.workingDays) : 0;
+  const daysLeft = sprint.start && sprint.finish ? workingDaysLeft(sprint.start, sprint.finish, dayKey(todayDay()), ws.settings.workingDays, input.teamDaysOff ?? []) : 0;
   const strip = h("div.tb-strip", null,
     h("b", null, sprint.name),
     h("span.muted", null, `${fmtDate(sprint.start, UTC_DATE)} – ${fmtDate(sprint.finish, UTC_DATE)}`),
-    h("span", { title: "Working days left in the sprint, today included" }, `${daysLeft} working day${daysLeft === 1 ? "" : "s"} left`),
+    h("span", { title: "Working days left in the sprint, today included, without the team's days off" }, `${daysLeft} working day${daysLeft === 1 ? "" : "s"} left`),
     h("span", null, `${rows.filter((r) => isDone(r.w)).length}/${rows.length} ${req.name.toLowerCase()} done`),
     h("span", null, `${allTasks.filter(isDone).length}/${allTasks.length} tasks done`),
     h("span", { title: "Remaining hours of the open tasks" }, `${Math.round(remaining * 10) / 10} h remaining`),
@@ -205,7 +218,10 @@ export function taskboard(input: TaskboardInput): HTMLElement {
       const row = Number(c.dataset.row);
       // "Other tasks" takes the task from its story; a task whose story is elsewhere keeps it there
       const parent = row || (inRows.has(t.parent ?? 0) ? 0 : t.parent ?? 0);
-      const state = c.dataset.state!;
+      const col = states.find((s) => s.name === c.dataset.state);
+      const state = col ? dropState(ws.process, t.type, col) : null;
+      // checked before anything is sent, so a task is never left half moved (new story, old state)
+      if (!state) { toast(`A ${t.type} has no state for the column ${c.dataset.state}`, { kind: "error" }); return; }
       void (async () => {
         if (parent !== (t.parent ?? 0) && !(await app.actions.reparent(t.id, parent))) return;
         if (t.state !== state) await app.actions.move(t.id, { state });

@@ -65,7 +65,7 @@ const FIELD_LABEL: Record<string, string> = {
   "System.AreaPath": "Area", "System.Tags": "Tags", "System.Description": "Description",
   "Microsoft.VSTS.Common.AcceptanceCriteria": "Acceptance criteria", "Microsoft.VSTS.Scheduling.StartDate": "Start date",
   "Microsoft.VSTS.Scheduling.TargetDate": "Target date", "Microsoft.VSTS.Scheduling.DueDate": "Due date",
-  "Microsoft.VSTS.Common.Priority": "Priority",
+  "Microsoft.VSTS.Common.Priority": "Priority", "System.Parent": "Parent",
 };
 
 export function fieldLabel(field: string): string {
@@ -116,10 +116,18 @@ export class Writer {
     // a copy marked as a guess (after a priority change or a refusal) has an old revision: read it first,
     // so a write right after (an Undo chain, a move after a reorder) is not refused as "changed meanwhile"
     if (it.stale) {
-      const guessRev = it.rev;
+      const guess = it;
       await this.ws.refresh(id).catch(() => undefined);
       it = this.item(id);
-      if (rev === guessRev) rev = it.rev;
+      if (!it.stale && (rev === undefined || rev === guess.rev)) {
+        // the change was planned on the guess: when someone else changed a field it writes meanwhile, refuse it
+        // (the newer revision would otherwise let it overwrite their change without a word)
+        const fields = ops.map((o) => /^\/fields\/(.+)$/.exec(o.path)?.[1]).filter((f): f is string => Boolean(f))
+          .filter((f) => !guess.fieldsRead || guess.fieldsRead.includes(f));
+        const differ = fields.filter((f) => !sameValue(this.valueOf(guess, f), this.valueOf(it, f)));
+        if (differ.length) throw new ConflictError(it, differ);
+        rev = it.rev;
+      }
     }
     const project = it.project ?? this.ws.project;
     try {
@@ -183,11 +191,18 @@ export class Writer {
    */
   async setFields(id: number, changes: FieldChange[], opts: { expect?: Record<string, unknown> } = {}): Promise<WriteResult> {
     return this.guarded(id, opts.expect, async (it) => {
+      // a field the copy was not read with only looks empty: read the item in full, so Undo puts back what was there
+      // (not an empty field) and clearing such a field is really sent
+      let was = it;
+      if (it.fieldsRead && changes.some((c) => !it.fieldsRead!.includes(c.field))) {
+        const full = await this.ws.api.item(it.project ?? this.ws.project, id);
+        was = { ...it, fields: { ...it.fields, ...full.fields } };
+      }
       const before: Record<string, unknown> = {};
       const after: Record<string, unknown> = {};
       const ops: PatchOp[] = [];
       for (const c of changes) {
-        const old = rawValue(it, c.field);
+        const old = rawValue(was, c.field);
         before[c.field] = old ?? null;
         after[c.field] = c.value ?? null;
         const empty = c.value == null || c.value === "";
@@ -400,8 +415,11 @@ export class Writer {
 
   // ---------- links ----------
 
-  /** Put an item under another parent (or under none with 0). */
-  async reparent(id: number, newParent: number): Promise<WriteResult> {
+  /**
+   * Put an item under another parent (or under none with 0). `expectParent`: the parent the change was planned on
+   * (an Undo); when the item now has another parent, someone moved it meanwhile: refused, nothing is sent.
+   */
+  async reparent(id: number, newParent: number, opts: { expectParent?: number } = {}): Promise<WriteResult> {
     if (id === newParent) throw new Error("An item cannot go under itself.");
     const cur = this.item(id);
     // read the item fresh with its links: the parent link to remove is found by its place in the list
@@ -409,6 +427,7 @@ export class Writer {
     if (!it) throw new Error(`Work item ${id} could not be read.`);
     if (it.rev >= cur.rev || cur.stale) this.ws.put(it, "poll");
     const old = it.parent ?? 0;
+    if (opts.expectParent !== undefined && old !== opts.expectParent) throw new ConflictError(it, ["System.Parent"]);
     if (old === newParent) return { item: it };
     if (newParent && this.ws.get(newParent) && this.ws.ancestors(this.item(newParent)).some((a) => a.id === id)) throw new Error("An item cannot go under its own child.");
     const ops: PatchOp[] = [];
@@ -423,7 +442,8 @@ export class Writer {
     const fresh = await this.patch(id, ops, action, { parent: old || null }, { parent: newParent || null }, undefined, it.rev);
     // the old and new parent changed too (their child links); read them again so their revisions match
     for (const p of [old, newParent]) if (p) this.refreshLater(p);
-    return { item: fresh, undo: () => this.reparent(id, old) };
+    // Undo puts it back only while it is still under the parent this change gave it
+    return { item: fresh, undo: () => this.reparent(id, old, { expectParent: newParent }) };
   }
 
   async addLink(id: number, rel: string, target: number): Promise<WriteResult> {
@@ -461,6 +481,8 @@ export class Writer {
       // copy as a guess, and read the item again; that read replaces it whatever its revision
       const fresh: WorkItem = { ...it, order: order ?? it.order, stale: true };
       this.ws.put(fresh);
+      // the answer has no links: links not read before are still not read (else rules on links would pass unchecked)
+      if (!it.relations) delete fresh.relations;
       const p = this.ws.get(previousId);
       void this.log.add({ by: this.me, byName: this.meName, itemId: id, itemTitle: it.title, itemType: it.type, action: `Priority: moved ${p ? `after #${p.id}` : "to the top"}`, before: { order: oldOrder ?? null }, after: { order: order ?? null }, ok: true });
       this.refreshLater(id);

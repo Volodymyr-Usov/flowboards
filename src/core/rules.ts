@@ -174,7 +174,8 @@ export function checkMove(rules: Rule[], f: Facts, steps: string[], from: string
   const b = steps.indexOf(to);
   const forward = b >= 0 && !(a >= 0 && b <= a);
   const direct = rulesForMove(rules, f.kind, steps, from, to);
-  const inherited = forward ? inheritedRules(rules, f.kind, b, (r) => steps.indexOf(r.target)).filter((r) => !direct.some((d) => d.id === r.id)) : [];
+  // who may make a move holds for that move only: an earlier column's "only these people" does not follow the item on
+  const inherited = forward ? inheritedRules(rules, f.kind, b, (r) => steps.indexOf(r.target)).filter((r) => !direct.some((d) => d.id === r.id)).map((r) => ({ ...r, onlyBy: [] })) : [];
   const problems = [...direct, ...inherited]
     .map((rule) => { const parts = missingParts(rule, f); return { rule, missing: parts.map((p) => p.label), parts }; })
     .filter((p) => p.missing.length);
