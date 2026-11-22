@@ -2,7 +2,7 @@
 // (the item that waits starts before the item it waits for ends), also across teams.
 import { REL, relId } from "../api/api.ts";
 import type { WorkItem } from "../api/types.ts";
-import type { Span } from "../core/timeaxis.ts";
+import type { Day, Span } from "../core/timeaxis.ts";
 
 export interface Dependency {
   /** the item waited for */
@@ -83,4 +83,23 @@ export function cleanTeams(raw: unknown, current: TeamRef, max = 12): TeamRef[] 
  */
 export function dragsFor(fields: { start: boolean; target: boolean }): { move: boolean; start: boolean; end: boolean } {
   return { move: fields.start && fields.target, start: fields.start, end: fields.target };
+}
+
+/**
+ * Late: not done, and its own target date has passed. A bar's end made up from a start date or the
+ * sprints of its work is no target date, so such a bar is never called late.
+ */
+export function isLate(done: boolean, target: Day | null | undefined, today: Day): boolean {
+  return !done && target != null && target < today;
+}
+
+/**
+ * The note under the roadmap about the likely dates: how many stories the pace comes from, or why there
+ * are no likely dates (nothing finished lately, or nothing open to forecast). `level`: the name of the
+ * level that is forecast (Feature in most processes).
+ */
+export function forecastNote(closed: number, forecasts: number, perWeek: number, level = "portfolio item"): string {
+  if (forecasts) return `Likely dates from ${closed} stories done in the last 12 weeks (about ${(Math.round(perWeek * 10) / 10).toLocaleString()} a week)`;
+  if (closed) return `No open ${level} has open stories under it, so there is nothing to forecast.`;
+  return "No stories were finished in the last 12 weeks, so there is no pace to forecast from.";
 }

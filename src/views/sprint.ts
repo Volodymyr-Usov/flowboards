@@ -509,9 +509,10 @@ export const sprintView: View = {
       }
       const members = cap instanceof Error ? [] : cap.members;
       const hasCap = members.some((m) => m.activities.some((a) => a.capacityPerDay > 0));
-      const from = sprint.start && Date.parse(sprint.start) < Date.now() ? today() : sprint.start;
       const off = teamDaysOff();
-      const dayCount = (personal: { start: string; end: string }[]): number => (from && sprint.finish && Date.parse(from.slice(0, 10)) <= Date.parse(sprint.finish.slice(0, 10)) ? workingDays(from, sprint.finish, ws.settings.workingDays, [...off, ...personal]) : 0);
+      // the working days from today (or the sprint's first day) on, compared as days: in the evening before the
+      // sprint starts (west of UTC its start moment has passed) the day before is not counted
+      const dayCount = (personal: { start: string; end: string }[]): number => (sprint.start && sprint.finish ? workingDaysLeft(sprint.start, sprint.finish, today(), ws.settings.workingDays, [...off, ...personal]) : 0);
       const personalOff = (m: CapacityMember): number => (sprint.start && sprint.finish ? workingDays(sprint.start, sprint.finish, ws.settings.workingDays, off) - workingDays(sprint.start, sprint.finish, ws.settings.workingDays, [...off, ...m.daysOff]) : 0);
       const rows: CapRow[] = [];
       const seen = new Set<string>();

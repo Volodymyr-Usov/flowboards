@@ -352,7 +352,8 @@ export class RestApi implements Api {
     const base = `${this.pt(project, team)}_apis/work/teamsettings/iterations/${enc(iterationId)}`;
     const [c, off] = await Promise.all([
       this.req("GET", `${base}/capacities?${V}`),
-      this.req("GET", `${base}/teamdaysoff?${V}`).catch(() => ({ daysOff: [] })),
+      // only "not there" means no days off: a failed read must not look like an empty list (a save after it would wipe them)
+      this.req("GET", `${base}/teamdaysoff?${V}`).catch((e) => { if ((e as ApiError).status === 404) return { daysOff: [] }; throw e; }),
     ]);
     const rows = c.teamMembers ?? c.value ?? [];
     return {

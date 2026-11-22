@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  countByMonth, derivePillars, findAncestor, keepRenamed, monthKeyOf, monthKeys, monthsStart, monthsStartTime, NO_PILLAR, NONE_VALUE,
+  countByMonth, derivePillars, epicPillarPatch, findAncestor, keepRenamed, monthKeyOf, monthKeys, monthsStart, monthsStartTime, NO_PILLAR, NONE_VALUE,
   pillarColor, pillarNamesFromTags, pillarOfEpic, pillarSource, progressOf, shortHash, slug, stateMismatch, sumRows,
 } from "../src/views/strategylogic.ts";
 
@@ -135,4 +135,15 @@ test("the first month of the chart starts at local midnight, so a close on its f
   assert.ok(new Date(2025, 9, 31, 23, 30).getTime() < since);
   // and it is the month monthKeys starts with
   assert.equal(monthKeyOf(new Date(since).toISOString()), monthKeys(now, 12)[0]);
+});
+
+test("a pillar chosen on an Epic's card saves the pillars found in tags with it, while none are saved", () => {
+  const shown = [{ id: "p-security", name: "Security", description: "x", color: "--s2" }, { id: "p-growth", name: "Growth" }];
+  const r = epicPillarPatch({ "1": "p-growth" }, [], 3, "p-security", shown);
+  assert.deepEqual(r.epicPillars, { "1": "p-growth", "3": "p-security" });
+  assert.deepEqual(r.pillars, [{ id: "p-security", name: "Security", color: "--s2" }, { id: "p-growth", name: "Growth" }], "the pillar stays when its tag goes away");
+  assert.equal(epicPillarPatch({}, [{ id: "a", name: "A" }], 3, "a", shown).pillars, undefined, "saved pillars are left as they are");
+  assert.equal(epicPillarPatch({ "3": "a" }, [], 3, NONE_VALUE, shown).pillars, undefined, "no pillar: nothing to keep");
+  const back = epicPillarPatch({ "3": "a" }, [], 3, NO_PILLAR, shown);
+  assert.deepEqual(back, { epicPillars: {} }, "back to the tag: the choice is removed");
 });

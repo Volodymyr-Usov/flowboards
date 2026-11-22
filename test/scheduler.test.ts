@@ -64,6 +64,10 @@ test("periods: month and quarter starts and ends", () => {
   assert.deepEqual(dates(make({ kind: "period", at: "quarter-end", offsetDays: 0 }), "2026-01-01", "2026-12-31"), ["2026-03-31", "2026-06-30", "2026-09-30", "2026-12-31"]);
   assert.deepEqual(dates(make({ kind: "period", at: "month-end", offsetDays: -1 }), "2026-02-01", "2026-03-31"), ["2026-02-27", "2026-03-30"]);
   assert.deepEqual(dates(make({ kind: "period", at: "month-start", offsetDays: 2 }), "2026-10-01", "2026-10-31"), ["2026-10-03"]);
+  // the largest offset (60 days) can reach three months away: 1 Mar 2027 minus 60 days is 31 Dec 2026
+  assert.deepEqual(dates(make({ kind: "period", at: "month-start", offsetDays: -60 }), "2026-12-31", "2026-12-31"), ["2026-12-31"]);
+  assert.deepEqual(dates(make({ kind: "period", at: "quarter-start", offsetDays: -60 }), "2027-01-01", "2027-01-31"), ["2027-01-31"], "1 Apr 2027 minus 60 days");
+  assert.deepEqual(dates(make({ kind: "period", at: "month-end", offsetDays: 60 }), "2027-03-31", "2027-05-31")[0], "2027-04-01", "31 Jan 2027 plus 60 days");
 });
 
 test("what is due: the last week back, never before the schedule existed", () => {

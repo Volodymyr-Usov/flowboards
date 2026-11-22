@@ -401,3 +401,100 @@ test("a write right after a priority change reads the guessed copy first, so its
   assert.deepEqual(sent, [4]);
   assert.equal(r.item.rev, 5);
 });
+
+test("a change planned on a guessed copy is refused when someone else changed that field meanwhile", async () => {
+  const { s, api } = fakeServer();
+  const sent: unknown[] = [];
+  (api as unknown as { reorder: () => Promise<{ id: number; order: number }[]> }).reorder = async () => {
+    s.items.set(1, item(1, "New", { rev: 4, order: 5 }));
+    return [{ id: 1, order: 5 }];
+  };
+  (api as unknown as { update: (p: string, id: number, ops: unknown[], o: { rev?: number }) => Promise<WorkItem> }).update = async (_p, id, ops, o) => {
+    const cur = s.items.get(id)!;
+    if (o.rev !== undefined && o.rev !== cur.rev) throw Object.assign(new Error("changed"), { status: 412 });
+    sent.push(ops);
+    const next = { ...cur, rev: cur.rev + 1, state: "Doing" as const };
+    s.items.set(id, next);
+    return structuredClone(next);
+  };
+  const ws = workspace(api, [item(1, "New", { rev: 3, order: 10 }), item(2, "New", { order: 1 })]);
+  s.items.set(1, item(1, "New", { rev: 3, order: 10 }));
+  const { w } = writer(api, ws);
+  s.delay = 30; // reads are slow, as on a real network
+  await w.reorder(1, 0, 2);
+  // a teammate closes it before our copy is read again; we still see it in New
+  s.items.set(1, item(1, "Done", { rev: 5, order: 5 }));
+  await assert.rejects(w.move(1, { state: "Doing" }), (e: Error & { conflict?: boolean }) => e.conflict === true);
+  assert.deepEqual(sent, [], "nothing was sent");
+  assert.equal(ws.get(1)?.state, "Done", "the teammate's change is what we show now");
+  // a change of another field meanwhile is no conflict
+  s.items.set(1, item(1, "Done", { rev: 6, order: 5, title: "Renamed" }));
+  ws.markStale(1);
+  const r = await w.setFields(1, [{ field: "System.State", value: "Doing" }]);
+  assert.equal(sent.length, 1);
+  assert.equal(r.item.rev, 7);
+});
+
+test("Undo of a parent change is refused when someone moved the item to another parent meanwhile", async () => {
+  const { s, api } = fakeServer();
+  const sent: unknown[][] = [];
+  (api as unknown as { update: (p: string, id: number, ops: unknown[]) => Promise<WorkItem> }).update = async (_p, id, ops) => {
+    sent.push(ops);
+    const cur = s.items.get(id)!;
+    const next = item(id, "New", { rev: cur.rev + 1, parent: 11, relations: [link(REL.parent, 11)] });
+    s.items.set(id, next);
+    return structuredClone(next);
+  };
+  const ws = workspace(api, [item(1, "New", { parent: 10 }), item(10, "New", { type: "Feature" }), item(11, "New", { type: "Feature" }), item(12, "New", { type: "Feature" })]);
+  s.items.set(1, item(1, "New", { rev: 2, parent: 10, relations: [link(REL.parent, 10)] }));
+  const { w } = writer(api, ws);
+  const r = await w.reparent(1, 11);
+  // a teammate moves it on to #12
+  s.items.set(1, item(1, "New", { rev: 9, parent: 12, relations: [link(REL.parent, 12)] }));
+  await assert.rejects(r.undo!(), (e: Error & { conflict?: boolean }) => e.conflict === true && /Parent/.test(e.message));
+  assert.equal(sent.length, 1, "only the first move was sent");
+  // while it is still where this change put it, Undo works
+  s.items.set(1, item(1, "New", { rev: 10, parent: 11, relations: [link(REL.parent, 11)] }));
+  await r.undo!();
+  assert.equal(sent.length, 2);
+});
+
+test("a field the copy was not read with: its old value is read first, so Undo puts it back and clearing it is sent", async () => {
+  const { s, api } = fakeServer();
+  const sent: { op: string; path: string }[][] = [];
+  (api as unknown as { item: (p: string, id: number) => Promise<WorkItem> }).item = async (_p, id) => structuredClone(s.items.get(id)!);
+  (api as unknown as { update: (p: string, id: number, ops: { op: string; path: string; value?: unknown }[]) => Promise<WorkItem> }).update = async (_p, id, ops) => {
+    sent.push(ops);
+    const cur = s.items.get(id)!;
+    const fields = { ...cur.fields };
+    for (const o of ops) { const f = o.path.replace("/fields/", ""); if (o.op === "remove") delete fields[f]; else fields[f] = o.value; }
+    const next = { ...cur, rev: cur.rev + 1, fields };
+    s.items.set(id, next);
+    return structuredClone(next);
+  };
+  // the board read #1 with a short field list: Custom.Risk is not in it
+  const ws = workspace(api, [item(1, "New", { fieldsRead: ["System.Title", "System.State"] })]);
+  s.items.set(1, item(1, "New", { fields: { "Custom.Risk": "Low" } }));
+  const { w } = writer(api, ws);
+  const r = await w.setFields(1, [{ field: "Custom.Risk", value: "High" }]);
+  await r.undo!();
+  assert.equal(s.items.get(1)!.fields["Custom.Risk"], "Low", "Undo puts the old value back");
+  await w.setFields(1, [{ field: "Custom.Risk", value: "" }]);
+  assert.equal(s.items.get(1)!.fields["Custom.Risk"], undefined, "clearing it is sent");
+  assert.deepEqual(sent.map((ops) => ops.map((o) => o.op)), [["add"], ["add"], ["remove"]]);
+});
+
+test("a priority change does not make links that were never read look read", async () => {
+  const { s, api } = fakeServer();
+  (api as unknown as { reorder: (p: string, t: string, ids: number[]) => Promise<{ id: number; order: number }[]> }).reorder = async (_p, _t, ids) => [{ id: ids[0], order: 5 }];
+  const ws = workspace(api, [item(1, "New", { order: 10 }), item(2, "New", { order: 1, relations: [link(REL.predecessor, 1)] })]);
+  s.items.set(1, item(1, "New", { rev: 2, order: 5 }));
+  s.items.set(2, item(2, "New", { rev: 2, order: 5, relations: [link(REL.predecessor, 1)] }));
+  s.delay = 30; // the read that follows has not come back yet
+  const { w } = writer(api, ws);
+  await w.reorder(1, 0, 2);
+  assert.ok(ws.get(1), "still there");
+  assert.equal(ws.get(1)!.relations, undefined, "still unread: a rule on links reads them first");
+  await w.reorder(2, 0, 1);
+  assert.equal(ws.get(2)!.relations?.length, 1, "links already read are kept");
+});

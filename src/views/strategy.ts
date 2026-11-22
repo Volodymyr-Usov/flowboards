@@ -15,7 +15,7 @@ import { checkPillars, editPillarsDialog, pillarDraft, savePillarsKept } from ".
 import { newId } from "./ruleeditor.ts";
 import type { PillarLike } from "./strategylogic.ts";
 import {
-  countByMonth, derivePillars, findAncestor, monthKeys, monthsStart, monthsStartTime, NO_PILLAR, NONE_VALUE, pillarColor, pillarNamesFromTags, SERIES_TOKENS,
+  countByMonth, derivePillars, epicPillarPatch, findAncestor, monthKeys, monthsStart, monthsStartTime, NO_PILLAR, NONE_VALUE, pillarColor, pillarNamesFromTags, SERIES_TOKENS,
   pillarOfEpic, pillarSource, progressOf, stateMismatch, sumRows,
 } from "./strategylogic.ts";
 
@@ -389,11 +389,10 @@ export const strategyView: View = {
             "aria-label": "Pillar",
             onchange: (ev: Event) => {
               const v = (ev.target as HTMLSelectElement).value;
-              const next = { ...app.settings.shared.epicPillars };
-              if (v) next[String(e.id)] = v;
-              else delete next[String(e.id)];
+              // pillars found only in tags are saved with the choice, as "Add Epic…" does
+              const patch = epicPillarPatch(app.settings.shared.epicPillars, app.settings.shared.pillars, e.id, v, pillars);
               void busy(null, async () => {
-                await app.actions.logged("Settings: Epic pillar changed", { type: "Settings", title: "Pillars" }, () => app.settings.saveShared({ epicPillars: next }));
+                await app.actions.logged("Settings: Epic pillar changed", { type: "Settings", title: "Pillars" }, () => app.settings.saveShared(patch));
                 toast(`Pillar of #${e.id} saved in this extension (Azure DevOps is not changed)`, { kind: "ok" });
               });
             },

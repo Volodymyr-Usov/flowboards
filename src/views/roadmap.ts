@@ -21,7 +21,7 @@ import { avatar, closePopup, empty, errorText, help, itemPicker, menu, popup, se
 import type { MenuItem } from "../ui/kit.ts";
 import { addDependencyChecked, removeDependencyAny } from "./deps.ts";
 import { ChildCounts } from "./childcounts.ts";
-import { cleanTeams, conflictCounts, dependencies, dependencyPairs, dragsFor, teamKey } from "./roadmaplogic.ts";
+import { cleanTeams, conflictCounts, dependencies, dependencyPairs, dragsFor, forecastNote, isLate, teamKey } from "./roadmaplogic.ts";
 import type { Dependency, TeamRef } from "./roadmaplogic.ts";
 import type { Day, Span } from "../core/timeaxis.ts";
 import {
@@ -97,8 +97,10 @@ export const roadmapView: View = {
 
     // other teams on the roadmap: chosen in the Teams popup, kept per team in this browser
     const me: TeamRef = { project: ws.project, team: ws.team };
-    const teamsPref = `roadmap:teams:${teamKey(me)}`;
-    let teams: TeamRef[] = cleanTeams(prefs.get<unknown>(teamsPref, []), me, MAX_TEAMS);
+    // kept by the project's and the team's ids, so a rename keeps the choice; the list kept by names before is read once
+    const teamsPrefOld = `roadmap:teams:${teamKey(me)}`;
+    const teamsPref = ws.projectId && ws.teamId ? `roadmap:teams:id:${ws.projectId}/${ws.teamId}` : teamsPrefOld;
+    let teams: TeamRef[] = cleanTeams(prefs.get<unknown>(teamsPref, null) ?? prefs.get<unknown>(teamsPrefOld, []), me, MAX_TEAMS);
     const plans = new Map<string, TeamPlan | Error>();
     let planToken = 0;
     // the other teams' items by id, with their team
@@ -525,7 +527,7 @@ export const roadmapView: View = {
       const lane = h("div.rm-lane", { style: { width: W + "px" } });
       const b = bars.get(it.id);
       const fc = st.forecast ? forecast.get(it.id) : undefined;
-      if (fc && !isClosed(it) && !r.team) lane.append(forecastEl(it, fc, b));
+      if (fc && !isClosed(it) && !r.team) lane.append(forecastEl(it, fc));
       if (b) lane.append(barEl(it, b, r));
       else lane.append(h("span.rm-nodate", { style: { left: Math.max(8, x(today()) - 60) + "px" }, title: r.team ? "No start or target date and no sprint." : "No start or target date and no sprint. Drag it from the Unscheduled list below onto the time line." }, "No dates"));
       return h("div.rm-row", { class: [r.depth === 0 && "top", kind === "requirement" && "story", selected === it.id && "sel", r.ctx && "ctx", r.team && "ext"], dataset: { id: it.id } }, name, lane);
@@ -580,7 +582,8 @@ export const roadmapView: View = {
       const p = progress(it);
       const pct = Math.round((p.done / p.total) * 100);
       const done = isDone(it);
-      const late = !done && b.end < today();
+      // late only against a real target date: an end taken from the sprints or a start date is no target
+      const late = isLate(done, planDay(it.targetDate), today());
       const left = x(b.start);
       const width = Math.max(4, (b.end - b.start + 1) * ppd);
       const how = b.kind === "dates" ? "" : b.kind === "partial" ? "\nOne date is missing: the other end comes from the sprints." : "\nNo dates: the bar shows the sprints of its work.";
@@ -607,10 +610,11 @@ export const roadmapView: View = {
     }
 
     /** The diamond at the day the item will likely be done (85 of 100 futures), red when after its target. */
-    function forecastEl(it: WorkItem, fc: ItemForecast, b: Bar | null | undefined): HTMLElement {
+    function forecastEl(it: WorkItem, fc: ItemForecast): HTMLElement {
       const t = today();
       const d85 = t + fc.p85;
-      const target = it.targetDate ? planDay(it.targetDate) : b && b.kind !== "sprints" ? b.end : null;
+      // only a real target date: a bar end made up from a start date or the sprints is not one
+      const target = planDay(it.targetDate);
       const risk = riskOf(d85, target ?? null);
       const capped = fc.p85 >= 3650;
       const label = capped ? "not within 10 years" : fmtDay(d85);
@@ -657,7 +661,7 @@ export const roadmapView: View = {
             if (under.length) forecast.set(e.id, { id: e.id, p50: Math.max(...under.map((u) => u.p50)), p85: Math.max(...under.map((u) => u.p85)), p95: Math.max(...under.map((u) => u.p95)) });
           }
         }
-        fcInfo = result.length ? `Likely dates from ${closed.length} stories done in the last 12 weeks (about ${(Math.round(perWeek * 10) / 10).toLocaleString()} a week)` : "No stories were finished in the last 12 weeks, so there is no pace to forecast from.";
+        fcInfo = forecastNote(closed.length, result.length, perWeek, featLevel?.name);
         fcLoaded = true;
       } catch (e) {
         fcInfo = `Likely dates could not be read: ${errorText(e)}`;

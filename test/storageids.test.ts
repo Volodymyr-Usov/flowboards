@@ -279,6 +279,12 @@ test("stored rules: damaged ones are left out or repaired, so no move breaks", (
   assert.deepEqual(r, { id: "r1", level: "requirement", target: "Done", requires: [], onlyBy: ["ann@x.example"], fields: [], extra: "kept" });
   const known = cleanRule({ level: "task", target: "Closed", requires: ["owner", "flying", 3], onlyBy: null }, 4)!;
   assert.deepEqual(known.requires, ["owner"], "a requirement this version does not know is left out");
+  assert.deepEqual((known as unknown as { unknownRequires: string[] }).unknownRequires, ["flying"], "but kept apart, so a save does not drop it");
+  assert.deepEqual(cleanRule({ ...known })!.requires, ["owner"], "read again after a save: still not checked");
+  assert.deepEqual((cleanRule({ ...known })! as unknown as { unknownRequires: string[] }).unknownRequires, ["flying"], "and still kept");
+  const later = cleanRule({ level: "task", target: "Closed", requires: ["owner"], unknownRequires: ["tags", "flying"] })!;
+  assert.deepEqual(later.requires, ["owner", "tags"], "a version that knows it takes it back");
+  assert.deepEqual((later as unknown as { unknownRequires: string[] }).unknownRequires, ["flying"]);
   assert.deepEqual(known.onlyBy, []);
   assert.equal(known.id, "rule-5");
   const good = { id: "g", level: "*", target: "Done", from: "Review", requires: ["owner"], onlyBy: ["bo@x.example"], note: "n", breaks: true, fields: ["System.Title"] };

@@ -29,6 +29,15 @@ test("only these people may", () => {
   assert.equal(checkMove([r], facts({ me: "BOSS@x.com" }), steps, "Resolved", "Closed").ok, true);
 });
 
+test("only these people may: holds for that move only, not for later moves of an item that stands there", () => {
+  const ready = rule("Ready", ["owner"], ["po@x.com"]);
+  assert.equal(checkMove([ready], facts({ hasOwner: true }), steps, "New", "Ready").ok, false, "the move to Ready itself is guarded");
+  assert.equal(checkMove([ready], facts({ hasOwner: true }), steps, "New", "Active").ok, false, "so is a move that jumps over Ready");
+  assert.equal(checkMove([ready], facts({ hasOwner: true }), steps, "Ready", "Active").ok, true, "a later move by someone else is not stopped");
+  const c = checkMove([ready], facts(), steps, "Ready", "Active");
+  assert.deepEqual(c.problems.map((p) => p.missing), [["Owner"]], "what Ready asks for still holds further on");
+});
+
 test("suggested rules follow the categories", () => {
   const s = suggestedRules([{ name: "New", category: "Proposed" }, { name: "Doing", category: "InProgress" }, { name: "Done", category: "Completed" }]);
   assert.deepEqual(s.map((r) => r.target), ["Doing", "Done"]);

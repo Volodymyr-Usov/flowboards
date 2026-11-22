@@ -37,7 +37,7 @@ import { boardScope, columnHidden, columnShownPatch, readBoardOpts, writeBoardOp
 import { blk } from "../ui/blocks.ts";
 import type { Opts } from "./boardprefs.ts";
 import { applyFills } from "./cardfill.ts";
-import { DEFAULT_RULES, alreadyBetween, ruleGaps, boardColumns, readAfterUndo, capCards, cardOrder, nearestBox, CELL_CAP, FEATURE_CAP, clockClass, COLUMN_CAP, columnEnteredAt, columnOf, countOf, daysInColumn, featureGroups, groupBy, limitShowing, matches, missing, movesToRow, placeAmong, prCount, prLinks, priorityMove, rowOf, runLimited, sharesState, sprintRows, tint } from "./boardmodel.ts";
+import { DEFAULT_RULES, alreadyBetween, railNeighbours, ruleGaps, boardColumns, readAfterUndo, capCards, cardOrder, nearestBox, CELL_CAP, FEATURE_CAP, clockClass, COLUMN_CAP, columnEnteredAt, columnOf, countOf, daysInColumn, featureGroups, groupBy, limitShowing, matches, missing, movesToRow, placeAmong, prCount, prLinks, priorityMove, rowOf, runLimited, sharesState, sprintRows, tint } from "./boardmodel.ts";
 
 interface PrInfo { status: string; title: string; repo: string; url: string }
 /** what arrow keys move between: cards, Features, Epics, taskboard stories and tasks */
@@ -105,11 +105,19 @@ export const boardView: View = {
     const people = peopleStrip({
       api: ws.api, onChange: () => draw(),
       store: { get: () => ({ only: o.onlyPeople, hidden: o.hiddenPeople }), set: (p) => { o.onlyPeople = p.only; o.hiddenPeople = p.hidden; save(); } },
-      // the stories of the columns that can show, passing the other filters
+      // what the page draws, passing the other filters: the stories of the columns shown (not those hidden by the eye,
+      // nor New or Closed when they are off); on the taskboard the sprint's stories and tasks
       items: () => {
+        // called while the strip is built, before isTaskboard() exists: read the layout itself
+        if (layout === "taskboard") {
+          const sp = sprintNow();
+          if (!sp) return [];
+          const tasks = taskLevel ? ws.ofLevel(taskLevel).filter((t) => isUnder(t.iteration, sp.path)) : [];
+          return [...ws.ofLevel(req).filter((w) => isUnder(w.iteration, sp.path) && fb.test(w)), ...tasks];
+        }
         const m = mode();
         const cols = boardColumns(ws.process, req, ws.board, m);
-        return ws.ofLevel(req).filter((w) => { const c = columnOf(cols, w, m); return c && (c.kind !== "outgoing" || o.closed) && fb.test(w); });
+        return ws.ofLevel(req).filter((w) => { const c = columnOf(cols, w, m); return c && !columnHidden(o, c) && fb.test(w); });
       },
     });
 
@@ -307,6 +315,7 @@ export const boardView: View = {
         board.append(taskboard({
           ...taskboardExtras(),
           app, sprint: sp, burndown: scrum && sp ? burn.el : undefined, storyOk: (w) => fb.test(w), personActive: people.active(), personOk: (w) => people.test(w), tags: o.tags,
+          teamDaysOff: sp ? teamDaysOffOf(sp) : [],
           hit: (w, tasks) => { const words = bar.search.words(); return words.length > 0 && matches(words, w, tasks.map((t) => t.title).join(" ")); },
           onlyHits: bar.search.pinned() && bar.search.words().length > 0,
           taskHit: (t) => matches(bar.search.words(), t, ""),
@@ -653,15 +662,14 @@ export const boardView: View = {
       // pull requests are not listed here: the purple count on the card opens them
       const drafting = draft?.parent === c.w.id ? draftRow(c.w) : null;
       if (!c.tasks.length && !drafting) return h("div.minilist.muted.small", null, "No tasks");
-      const ts = c.tasks[0] ? orderedStates(ws.process, [c.tasks[0].type]) : [];
-      const doneState = ts.find((s) => s.category === "Completed")?.name;
-      const openState = ts.find((s) => s.category === "Proposed")?.name;
+      // the states a tick sends are the task's own type's: bugs managed with tasks have other states than tasks
+      const tickTo = (t: WorkItem): string | undefined => orderedStates(ws.process, [t.type]).find((s) => s.category === (isDone(t) ? "Proposed" : "Completed"))?.name;
       // the tasks sit in their own tray under the story: tinted, with the task type's colour on its edge
       return h("div.minilist.tray", { style: { "--tcol": typeColor(ws.process, c.tasks[0]?.type ?? taskLevel?.defaultType ?? "Task") } },
         h("div.tray-head", null, "Tasks", h("span.mono", null, ` ${c.tasks.filter(isDone).length}/${c.tasks.length}`)),
         drafting,
         c.tasks.map((t) => h("label.mini", { class: [movedTask?.id === t.id && movedTask.story === c.w.id ? "moved" : ""], title: `${t.type} #${t.id}: ${t.state}${t.assignedTo ? ` · ${t.assignedTo.displayName}` : ""}` },
-          h("input", { type: "checkbox", checked: isDone(t), disabled: app.actions.readOnly || !doneState, dataset: { task: t.id, to: isDone(t) ? openState ?? "" : doneState ?? "" } }),
+          h("input", { type: "checkbox", checked: isDone(t), disabled: app.actions.readOnly || !tickTo(t), dataset: { task: t.id, to: tickTo(t) ?? "" } }),
           trash(t),
           h("span.m-title", { dataset: { open: t.id } }, t.title),
           t.assignedTo && !samePerson(t.assignedTo, c.w.assignedTo) ? avatar(ws.api, t.assignedTo, 16) : null)));
@@ -1334,14 +1342,12 @@ export const boardView: View = {
         if (feat && feat !== drag.src) {
           const r = feat.getBoundingClientRect();
           const top = y < r.top + r.height / 2;
-          const list = [...board.querySelectorAll<HTMLElement>(".rail .feat:not(.orphan)")].filter((f) => f !== drag!.src);
-          const i = list.indexOf(feat);
-          const prev = top ? list[i - 1] : feat;
-          const next = top ? feat : list[i + 1];
           feat.parentElement!.insertBefore(marker, top ? feat : feat.nextSibling);
           const targetEpic = epic ? Number(epic.dataset.epic) : 0;
           if (epic && targetEpic !== srcEpic) { epic.classList.add("drop"); drag.target = { type: "epic", id: targetEpic }; return; }
-          drag.target = { type: "featOrder", prev: prev ? Number(prev.dataset.id) : 0, next: next ? Number(next.dataset.id) : 0 };
+          // the neighbours in backlog order: those drawn next to it may sit in another Epic's box
+          const { prev, next } = railNeighbours(ws.ofLevel(featLevel).map((f) => f.id), drag.id, Number(feat.dataset.id), top);
+          drag.target = { type: "featOrder", prev, next };
           return;
         }
         if (epic && Number(epic.dataset.epic) !== srcEpic) {
@@ -1387,7 +1393,8 @@ export const boardView: View = {
         }
       } else {
         if (t.type === "epic") void app.actions.reparent(d.id, t.id);
-        else if (t.type === "featOrder") void app.actions.reorder(d.id, t.prev, t.next);
+        // dropped back where it already is: nothing to send
+        else if (t.type === "featOrder" && !alreadyBetween(w, ws.get(t.prev), ws.get(t.next))) void app.actions.reorder(d.id, t.prev, t.next);
       }
     }
 
@@ -1545,6 +1552,16 @@ export const boardView: View = {
         onclick: (e: Event) => menu(e.currentTarget as HTMLElement, hiddenCols.map((c) => ({ label: `Show ${c.name}`, onClick: () => showColumn(c) }))),
       }, `${hiddenCols.length} column${hiddenCols.length === 1 ? "" : "s"} hidden`) : null;
       replace(bar.line3, group("People", people.el), group("Filters", fb.el), colsBtn ? group("Columns", colsBtn) : null);
+    }
+
+    /** The team's days off of each sprint, read once per sprint (for the taskboard's "working days left"); null while read. */
+    const sprintDaysOff = new Map<string, { start: string; end: string }[] | null>();
+    function teamDaysOffOf(sp: Iteration): { start: string; end: string }[] {
+      const known = sprintDaysOff.get(sp.id);
+      if (known !== undefined) return known ?? [];
+      sprintDaysOff.set(sp.id, null);
+      ws.api.capacity(ws.project, ws.team, sp.id).then((c) => { sprintDaysOff.set(sp.id, c.teamDaysOff); redrawSoon(); }, () => undefined);
+      return [];
     }
 
     /** The taskboard's sprint: the one picked, else the current one, else the next one. */

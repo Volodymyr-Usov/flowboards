@@ -20,7 +20,7 @@ import { canSplitByHalf, followUpTitle, partTitles, splitTasks } from "../core/s
 import { askDelete } from "./deleteask.ts";
 import { TASK_DRAG } from "./dragtypes.ts";
 import { h, icon } from "./dom.ts";
-import { avatar, errorText, itemLink, itemPicker, personPicker, spinner, stateMark, toast, typeMark } from "./kit.ts";
+import { avatar, confirm, errorText, itemLink, itemPicker, personPicker, spinner, stateMark, toast, typeMark } from "./kit.ts";
 import { attachMentions, lockMentions, mentionSourceFor } from "./mentions.ts";
 import { sanitize, sanitizeToString, textToHtml } from "./sanitize.ts";
 import { tagInput, usedTags } from "./taginput.ts";
@@ -115,19 +115,42 @@ export function createPanel(app: App): Panel {
 
   /** the items this one was opened from inside the panel (a task from its story), the latest last */
   const trail: number[] = [];
+  /**
+   * A box whose save failed (refused as changed by someone else, or not saved for another reason) still holds
+   * the typed text, and drawing another item or closing would drop it without a word: ask first.
+   */
+  let asking = false;
+  function leaveOk(go: () => void): void {
+    const box = root.querySelector<HTMLElement>(".unsaved");
+    if (!box) { go(); return; }
+    if (asking) return;
+    asking = true;
+    const what = box.classList.contains("panel-title") ? "the title" : `the ${(box.getAttribute("aria-label") ?? "text").toLowerCase()}`;
+    void confirm("Not saved", `Your change to ${what} was not saved. Leave anyway? The typed text will be lost.`, "Leave", true)
+      // staying: the page and the address name this item again (a click or a link may have named another)
+      .then((ok) => { asking = false; if (ok) go(); else { notify(); box.focus({ preventScroll: true }); } });
+  }
+
   /** open an item from the outside (a card, a link in a view): a fresh start, nothing to go back to */
   function open(id: number): void {
-    if (id !== currentId) trail.length = 0;
-    show(id);
+    leaveOk(() => {
+      if (id !== currentId) trail.length = 0;
+      show(id);
+    });
   }
   /** open an item from inside the panel (the parent, a child, a dependency): Back, Esc and the mouse's Back return */
   function go(id: number): void {
-    if (currentId != null && id !== currentId) { trail.push(currentId); if (trail.length > 30) trail.shift(); }
-    show(id);
+    leaveOk(() => {
+      if (currentId != null && id !== currentId) { trail.push(currentId); if (trail.length > 30) trail.shift(); }
+      show(id);
+    });
   }
   function back(): void {
-    const prev = trail.pop();
-    if (prev != null) show(prev);
+    if (!trail.length) return;
+    leaveOk(() => {
+      const prev = trail.pop();
+      if (prev != null) show(prev);
+    });
   }
 
   function show(id: number): void {
@@ -151,6 +174,9 @@ export function createPanel(app: App): Panel {
   }
 
   function close(): void {
+    leaveOk(closeNow);
+  }
+  function closeNow(): void {
     const hadFocus = root.contains(document.activeElement);
     flush();
     trail.length = 0;
@@ -344,8 +370,9 @@ export function createPanel(app: App): Panel {
         it.priority == null ? h("option", { value: "", selected: true }, "–") : null,
         [1, 2, 3, 4].map((p) => h("option", { value: p, selected: it.priority === p }, String(p)))),
       (v) => actions.setField(it.id, "Microsoft.VSTS.Common.Priority", v === "" ? "" : Number(v)))) : null,
-      level?.kind === "portfolio" || has("Microsoft.VSTS.Scheduling.TargetDate") && (it.startDate || it.targetDate) ? row("Start", date("Microsoft.VSTS.Scheduling.StartDate", it.startDate)) : null,
-      level?.kind === "portfolio" || has("Microsoft.VSTS.Scheduling.TargetDate") && (it.startDate || it.targetDate) ? row("Target", date("Microsoft.VSTS.Scheduling.TargetDate", it.targetDate)) : null,
+      // each date box only where the type has that field (a custom portfolio type may have neither)
+      has("Microsoft.VSTS.Scheduling.StartDate") && (level?.kind === "portfolio" || it.startDate || it.targetDate) ? row("Start", date("Microsoft.VSTS.Scheduling.StartDate", it.startDate)) : null,
+      has("Microsoft.VSTS.Scheduling.TargetDate") && (level?.kind === "portfolio" || it.startDate || it.targetDate) ? row("Target", date("Microsoft.VSTS.Scheduling.TargetDate", it.targetDate)) : null,
       level?.kind === "task" && has("Microsoft.VSTS.Scheduling.DueDate") ? row("Due", date("Microsoft.VSTS.Scheduling.DueDate", it.dueDate)) : null,
       row("Area", h("span", { title: it.area }, leaf(it.area))),
     );

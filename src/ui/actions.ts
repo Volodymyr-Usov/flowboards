@@ -5,7 +5,7 @@ import { REL, relId } from "../api/api.ts";
 import type { DeletedItem, WorkItem } from "../api/types.ts";
 import type { CheckItem, Checklists } from "../core/checklist.ts";
 import { AC_FIELD, typeHasField } from "../core/health.ts";
-import { levelOf } from "../core/model.ts";
+import { levelOf, plainText } from "../core/model.ts";
 import type { MoveCheck, Requirement } from "../core/rules.ts";
 import { fieldTitle, isEmptyValue } from "../core/rules.ts";
 import type { ChildTemplate } from "../core/templates.ts";
@@ -210,17 +210,23 @@ export class Actions {
     const after: (() => Promise<unknown>)[] = [];
     const row = (label: string, control: HTMLElement): void => { rows.push(h("label.set-field", null, h("span", null, label), control)); };
     const area = (ph: string): HTMLTextAreaElement => h("textarea.input", { rows: 3, placeholder: ph, "aria-label": ph }) as HTMLTextAreaElement;
-    if (reqs.has("description")) {
-      const t = area("Describe it, at least 20 characters");
-      row("Description", t);
-      changes.push(() => (t.value.trim() ? { field: "System.Description", value: textToHtml(t.value) } : null));
-    }
+    /** the values the rich boxes started from: a teammate's newer text is not overwritten (see setFields' expect) */
+    const expect: Record<string, unknown> = {};
+    /** a description or acceptance criteria: what is typed is added after the text there now (a picture, a short line), never instead of it */
+    const rich = (field: string, label: string, min: number): void => {
+      const old = it.fields[field];
+      const has = typeof old === "string" && (plainText(old) !== "" || /<img/i.test(old));
+      const t = area(has ? `Added after what is there now; at least ${min} characters in all` : `${label}, at least ${min} characters`);
+      row(label, t);
+      changes.push(() => {
+        if (!t.value.trim()) return null;
+        expect[field] = old;
+        return { field, value: has ? `${old as string}${textToHtml(t.value)}` : textToHtml(t.value) };
+      });
+    };
+    if (reqs.has("description")) rich("System.Description", "Description", 20);
     // a type without acceptance criteria (Basic's Issue, a custom type) gets no box for them
-    if (reqs.has("acceptance") && typeHasField(ws.process, it.type, AC_FIELD)) {
-      const t = area("The acceptance criteria, at least 10 characters");
-      row("Acceptance criteria", t);
-      changes.push(() => (t.value.trim() ? { field: "Microsoft.VSTS.Common.AcceptanceCriteria", value: textToHtml(t.value) } : null));
-    }
+    if (reqs.has("acceptance") && typeHasField(ws.process, it.type, AC_FIELD)) rich(AC_FIELD, "Acceptance criteria", 10);
     if (reqs.has("owner")) {
       const s = h("select.input", { "aria-label": "Owner" }, h("option", { value: "" }, "Pick someone…"), ws.people().map((p) => h("option", { value: p.uniqueName }, p.displayName))) as HTMLSelectElement;
       row("Owner", s);
@@ -271,7 +277,8 @@ export class Actions {
       apply: async () => {
         const list = changes.map((c) => c()).filter((c): c is FieldChange => !!c);
         let did = false;
-        if (list.length) did = (await this.setFields(id, list, undefined, true)) !== null;
+        // not quiet: the save gets its own Undo, and a refusal (changed by someone else meanwhile) says so
+        if (list.length) did = (await this.setFields(id, list, `Filled in ${this.label(id)}`, false, Object.keys(expect).length ? expect : undefined)) !== null;
         for (const job of after) { try { await job(); did = true; } catch (e) { toast(errorText(e), { kind: "error" }); } }
         if (!did) toast("Nothing was filled in, so nothing was fixed.", { kind: "error" });
         return did;

@@ -108,6 +108,11 @@ export const flowView: View = {
     let tagOnly = prefs.get<string>("flow:tag", "");
     /** finished items read from Azure DevOps, by level, period and first day */
     const cache = new Map<string, WorkItem[]>();
+    /** the periods whose list hit the most one query of Azure DevOps sends (the oldest finished items are not in it) */
+    const cut = new Set<string>();
+    /** the period a load is reading now, and the day the last load started */
+    let loading = "";
+    let loadDay = dayIndex(Date.now());
     let token = 0;
     let data: Data | null = null;
     let forecastDay: number | null = null;
@@ -194,12 +199,22 @@ export const flowView: View = {
         typeOnly || tagOnly ? h("button.btn.link.small", { type: "button", title: "Count every item of the level again", onclick: () => { typeOnly = ""; tagOnly = ""; prefs.set("flow:type", ""); prefs.set("flow:tag", ""); rerender(); } }, "Show all") : null);
     }
     drawFilters();
-    const rerender = (): void => { drawFilters(); if (data && cache.has(currentKey())) render(); };
+    const rerender = (): void => { drawFilters(); if (data && ready()) render(); };
     /** The item passes the type and tag filters. */
     const counts = (w: WorkItem): boolean => (!typeOnly || !level.types.includes(typeOnly) || w.type === typeOnly) && (!tagOnly || w.tags.includes(tagOnly));
 
     const key = (startDay: number): string => `${level.id}:${weeks}:${startDay}`;
     const currentKey = (): string => key(dayIndex(Date.now()) - weeks * 7 + 1);
+    /**
+     * The finished items of the period as it is today are read. After midnight the period starts a day later and its
+     * list is not read yet: read it (once), and draw when it is there, instead of drawing with an empty list.
+     */
+    function ready(): boolean {
+      const k = currentKey();
+      if (cache.has(k)) return true;
+      if (data && loading !== k && loadDay !== dayIndex(Date.now())) void load();
+      return false;
+    }
 
     async function load(): Promise<void> {
       drawScope();
@@ -207,7 +222,9 @@ export const flowView: View = {
       const startDay = today - weeks * 7 + 1;
       const k = key(startDay);
       const my = ++token;
-      if (cache.has(k)) { render(); return; }
+      loadDay = today;
+      if (cache.has(k)) { loading = ""; render(); return; }
+      loading = k;
       if (data) body.classList.add("flow-dim");
       else body.replaceChildren(spinner("Reading finished items…"));
       status.textContent = "Reading finished items…";
@@ -215,7 +232,8 @@ export const flowView: View = {
         const types = level.types;
         const states = statesOf(ws.process, types, ["Completed"]);
         const areas = ws.settings.areas.length ? ws.settings.areas : undefined;
-        const ids = states.length ? await app.api.query(ws.project, { types, areas, states, closedAfter: dayIso(startDay) }) : [];
+        // newest first: if there are more than Azure DevOps sends, the oldest are the ones left out (and the page says so)
+        const ids = states.length ? await app.api.query(ws.project, { types, areas, states, closedAfter: dayIso(startDay), orderBy: "closed" }) : [];
         const items: WorkItem[] = [];
         for (let i = 0; i < ids.length; i += BATCH) {
           if (my !== token) return;
@@ -223,11 +241,14 @@ export const flowView: View = {
           items.push(...await app.api.items(ws.project, ids.slice(i, i + BATCH)));
         }
         if (my !== token) return;
+        loading = "";
         cache.set(k, items);
+        if ((ids as { truncated?: boolean }).truncated) cut.add(k);
         drawFilters();
         render();
       } catch (e) {
         if (my !== token) return;
+        loading = "";
         status.textContent = "";
         body.classList.remove("flow-dim");
         body.replaceChildren(failed(e, () => { data = null; void load(); }));
@@ -306,7 +327,7 @@ export const flowView: View = {
 
     function render(): void {
       const d = (data = compute());
-      status.textContent = "";
+      status.textContent = cut.has(currentKey()) ? "Azure DevOps sends at most 20,000 items: only the most recently finished ones were read, so the first weeks count fewer than were finished." : "";
       body.classList.remove("flow-dim");
       charts = [];
       fc.clear();
@@ -375,7 +396,7 @@ export const flowView: View = {
       const toggle = columnsShown() ? segmented([
         { value: "state", label: "By state", title: "Bands by state: not started, in progress, resolved, done" },
         { value: "column", label: "By board column", title: "Bands by the columns of the team's board, from each item's history of column moves" },
-      ], byCol ? "column" : "state", (v) => { cfdBy = v; prefs.set("flow:cfdBy", v); render(); }) : null;
+      ], byCol ? "column" : "state", (v) => { cfdBy = v; prefs.set("flow:cfdBy", v); if (ready()) render(); }) : null;
       const helpText = byCol
         ? "For each day, how many items stood in each column of the team's board, read from each item's history of column moves (where it cannot be read, its start and finish dates stand in). Done counts only items finished in this period. A band that keeps getting wider means work waits in that column. Click a band to see its items on that day."
         : "For each day, how many items were not started, in progress, resolved and done. Done counts only items finished in this period. A band that keeps getting wider means work waits there. Click a band to see its items on that day.";
@@ -519,7 +540,7 @@ export const flowView: View = {
     // work changed while a forecast box is being typed in: draw again when it is left, not under the caret
     let waiting = false;
     const redraw = debounce(() => {
-      if (!(data && cache.has(currentKey()))) return;
+      if (!(data && ready())) return;
       if (body.contains(document.activeElement) && document.activeElement?.matches("input")) { waiting = true; return; }
       waiting = false;
       render();

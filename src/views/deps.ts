@@ -1,6 +1,7 @@
 // Dependencies: Which work waits for which, as a graph; flags work blocked by open predecessors.
 // Links are Predecessor/Successor relations, read in batches with ws.withRelations. Items linked from
-// outside the team are read once and shown dimmed. Layout: src/views/graphlayout.ts.
+// outside the team are shown dimmed and read again at most once a minute (their state changes too).
+// Layout: src/views/graphlayout.ts.
 // The first link of an item is added with "+ Dependency" (two item pickers); later ones also by dragging.
 import { REL, relId } from "../api/api.ts";
 import type { WorkItem } from "../api/types.ts";
@@ -24,6 +25,8 @@ const ROW = 84;
 const PAD = 30;
 /** the graph opens at least this large, so the text stays readable; pan for the rest */
 const MIN_ZOOM = 0.8;
+/** how long the copies of linked items outside the team are kept before they are all read again */
+const OUTSIDE_TTL = 60_000;
 
 /** The "waits for" links between the loaded items whose links are read. */
 function loadedEdges(app: App): Edge[] {
@@ -138,6 +141,8 @@ export const depsView: View = {
     /** linked items that are not part of the team's loaded work */
     const outside = new Map<number, WorkItem>();
     const missing = new Set<number>();
+    /** when the linked items outside the team were last all read (their state can change: another team closes one) */
+    let outsideAt = 0;
 
     // ---- page ----
     const bar = pageBar(app, { search: {
@@ -210,17 +215,22 @@ export const depsView: View = {
       const kinds = new Set(["portfolio", "requirement"]);
       const ids = [...ws.items.values()].filter((i) => isOpen(i) && kinds.has(ws.levelOf(i)?.kind ?? "")).map((i) => i.id);
       await ws.withRelations(ids);
+      // new links are read at once; every item outside the team again once a minute
+      const all = Date.now() - outsideAt >= OUTSIDE_TTL;
       const linked = new Set<number>();
       for (const it of ws.items.values()) for (const r of it.relations ?? []) {
         if (r.rel !== REL.predecessor && r.rel !== REL.successor) continue;
         const o = relId(r);
-        if (o && !ws.items.has(o) && !outside.has(o) && !missing.has(o)) linked.add(o);
+        if (o && !ws.items.has(o) && (all || (!outside.has(o) && !missing.has(o)))) linked.add(o);
       }
-      if (linked.size) {
-        const got = await ws.api.items(ws.project, [...linked]).catch(() => [] as WorkItem[]);
-        for (const g of got) outside.set(g.id, g);
-        for (const id of linked) if (!outside.has(id)) missing.add(id);
-      }
+      if (!linked.size) { if (all) outsideAt = Date.now(); return; }
+      // a read that fails keeps what we had, and is tried again on the next load
+      const got = await ws.api.items(ws.project, [...linked]).catch(() => null);
+      if (!got) return;
+      if (all) outsideAt = Date.now();
+      const read = new Set(got.map((g) => g.id));
+      for (const g of got) { outside.set(g.id, g); missing.delete(g.id); }
+      for (const id of linked) if (!read.has(id)) { outside.delete(id); missing.add(id); }
     }
 
     function buildGraph(): Graph {
@@ -604,6 +614,7 @@ export const depsView: View = {
     let loading: Promise<void> | null = null;
     const refresh = async (refit: boolean): Promise<void> => {
       if (loading) await loading;
+      if (!alive) return;
       loading = load();
       try { await loading; } finally { loading = null; }
       if (!alive) return;
@@ -611,7 +622,8 @@ export const depsView: View = {
       draw(refit);
     };
     void refresh(true).catch((e) => { if (alive) body.replaceChildren(failed(e, () => { body.replaceChildren(spinner("Reading the links…")); void refresh(true); })); });
-    const later = debounce(() => { void refresh(false).catch((e) => toast(String((e as Error).message ?? e), { kind: "error" })); }, 200);
+    // the page may be gone by the time the wait is over: then nothing is read and no message shows
+    const later = debounce(() => { if (alive) void refresh(false).catch((e) => { if (alive) toast(String((e as Error).message ?? e), { kind: "error" }); }); }, 200);
 
     return {
       update() { fb.refresh(); later(); },
