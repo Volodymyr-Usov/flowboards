@@ -3,6 +3,8 @@
 import { REL, relId } from "../api/api.ts";
 import type { WorkItem } from "../api/types.ts";
 import type { Day, Span } from "../core/timeaxis.ts";
+import { planIso } from "../core/timeaxis.ts";
+import { dayIndex } from "../core/metrics.ts";
 
 export interface Dependency {
   /** the item waited for */
@@ -102,4 +104,13 @@ export function forecastNote(closed: number, forecasts: number, perWeek: number,
   if (forecasts) return `Likely dates from ${closed} stories done in the last 12 weeks (about ${(Math.round(perWeek * 10) / 10).toLocaleString()} a week)`;
   if (closed) return `No open ${level} has open stories under it, so there is nothing to forecast.`;
   return "No stories were finished in the last 12 weeks, so there is no pace to forecast from.";
+}
+
+/**
+ * Where the pace behind the likely dates starts: local midnight of the oldest of the `days` days that end today,
+ * the very days dailyThroughput counts, so every story the note counts is in the pace too (the day before was
+ * read but not counted). A moment, not a bare date, so Azure DevOps does not judge it by the day of its own time zone.
+ */
+export function paceSince(days: number, now = Date.now()): string {
+  return planIso(dayIndex(now) - days + 1);
 }
