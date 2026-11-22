@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { REL } from "../src/api/api.ts";
 import type { WorkItem } from "../src/api/types.ts";
 import { pool } from "../src/core/teamplans.ts";
-import { cleanTeams, conflictCounts, dependencies, dependencyPairs, dragsFor, forecastNote, isLate } from "../src/views/roadmaplogic.ts";
+import { cleanTeams, conflictCounts, dependencies, dependencyPairs, dragsFor, forecastNote, isLate, paceSince } from "../src/views/roadmaplogic.ts";
+import { dailyThroughput } from "../src/core/forecast.ts";
 
 test("roadmap drags only the dates the type has", () => {
   assert.deepEqual(dragsFor({ start: true, target: true }), { move: true, start: true, end: true });
@@ -73,4 +74,17 @@ test("the likely-dates note says why there are none: nothing finished, or nothin
   assert.match(forecastNote(30, 4, 2.5, "Feature"), /^Likely dates from 30 stories/);
   assert.equal(forecastNote(30, 0, 2.5, "Feature"), "No open Feature has open stories under it, so there is nothing to forecast.");
   assert.match(forecastNote(0, 0, 0, "Feature"), /^No stories were finished/);
+});
+
+test("the likely dates' pace reads exactly the days it counts: a story finished on the oldest day counts, one the day before is not read", () => {
+  const sum = (xs: number[]): number => xs.reduce((a, b) => a + b, 0);
+  for (const now of [Date.parse("2026-11-22T13:00:00Z"), Date.parse("2026-11-22T00:30:00Z"), Date.parse("2026-03-29T23:30:00Z")]) {
+    const since = paceSince(84, now);
+    assert.match(since, /T/, "a moment, so Azure DevOps compares the time too");
+    const first = new Date(Date.parse(since) + 60_000).toISOString();
+    const before = new Date(Date.parse(since) - 60_000).toISOString();
+    assert.equal(dailyThroughput([first], 84, now)[0], 1, `the first minute of the window is on its first day (${new Date(now).toISOString()})`);
+    assert.equal(sum(dailyThroughput([before], 84, now)), 0, "the minute before is outside the pace, and outside the query too");
+    assert.equal(sum(dailyThroughput([new Date(now).toISOString()], 84, now)), 1, "today counts");
+  }
 });

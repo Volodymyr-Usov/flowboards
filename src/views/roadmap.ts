@@ -21,7 +21,7 @@ import { avatar, closePopup, empty, errorText, help, itemPicker, menu, popup, se
 import type { MenuItem } from "../ui/kit.ts";
 import { addDependencyChecked, removeDependencyAny } from "./deps.ts";
 import { ChildCounts } from "./childcounts.ts";
-import { cleanTeams, conflictCounts, dependencies, dependencyPairs, dragsFor, forecastNote, isLate, teamKey } from "./roadmaplogic.ts";
+import { cleanTeams, conflictCounts, dependencies, dependencyPairs, dragsFor, forecastNote, isLate, paceSince, teamKey } from "./roadmaplogic.ts";
 import type { Dependency, TeamRef } from "./roadmaplogic.ts";
 import type { Day, Span } from "../core/timeaxis.ts";
 import {
@@ -636,10 +636,11 @@ export const roadmapView: View = {
         const portfolio = ws.portfolioLevels().slice().sort((a, b) => a.rank - b.rank);
         const featLevel = portfolio[portfolio.length - 1];
         const DAYS = 84;
-        const since = new Date(Date.now() - DAYS * 86_400_000).toISOString().slice(0, 10);
+        const now = Date.now();
+        const since = paceSince(DAYS, now);
         const ids = await ws.api.query(ws.project, { types: req.types, areas: ws.settings.areas.length ? ws.settings.areas : undefined, states: statesOf(ws.process, req.types, ["Completed"]), closedAfter: since });
         const closed = (await ws.api.items(ws.project, ids)).map((w) => w.closed).filter((c): c is string => !!c);
-        const samples = dailyThroughput(closed, DAYS);
+        const samples = dailyThroughput(closed, DAYS, now);
         const perWeek = closed.length / (DAYS / 7);
         const isReq = (w: WorkItem): boolean => req.types.includes(w.type);
         const openStories = (id: number): number => ws.children(id).filter((k) => isReq(k) && !isDone(k)).length;
